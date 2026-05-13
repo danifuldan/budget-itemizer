@@ -1,0 +1,38 @@
+{
+  "merchant": "Walmart",
+  "transactionDate": "2026-11-07",
+  "totalAmount": 33.66,
+  "tax": 1.95,
+  "shipping": 0,
+  "fees": 0,
+  "discount": 0,
+  "credit": 0,
+  "refund": 0,
+  "lineItems": [
+    {
+      "productName": "Whole milk gallon",
+      "quantity": 2,
+      "lineItemTotalAmount": 7.98
+    },
+    {
+      "productName": "Sourdough loaf",
+      "quantity": 1,
+      "lineItemTotalAmount": 4.49
+    },
+    {
+      "productName": "Bananas (per bunch)",
+      "quantity": 3,
+      "lineItemTotalAmount": 5.97
+    },
+    {
+      "productName": "Black beans 15oz can",
+      "quantity": 1,
+      "lineItemTotalAmount": 1.29
+    },
+    {
+      "productName": "Greek yogurt 32oz",
+      "quantity": 2,
+      "lineItemTotalAmount": 11.98
+    }
+  ]
+}

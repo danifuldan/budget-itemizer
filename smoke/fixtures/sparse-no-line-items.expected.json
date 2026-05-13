@@ -1,0 +1,12 @@
+{
+  "merchant": "Imaginary Coffee Roasters",
+  "transactionDate": "2026-09-18",
+  "totalAmount": 6.75,
+  "tax": 0,
+  "shipping": 0,
+  "fees": 0,
+  "discount": 0,
+  "credit": 0,
+  "refund": 0,
+  "lineItems": []
+}

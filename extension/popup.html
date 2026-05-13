@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=380">
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <img src="icons/icon48.png" alt="" class="header-icon">
+        <h1 class="header-title">Budget Itemizer</h1>
+      </div>
+      <button id="settings-btn" class="icon-btn" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M6.5 1.5L6.7 3.1a5 5 0 011.6.7l1.4-.8 1.4 1.4-.8 1.4a5 5 0 01.7 1.6l1.6.2v2l-1.6.2a5 5 0 01-.7 1.6l.8 1.4-1.4 1.4-1.4-.8a5 5 0 01-1.6.7l-.2 1.6h-2l-.2-1.6a5 5 0 01-1.6-.7l-1.4.8-1.4-1.4.8-1.4a5 5 0 01-.7-1.6L1.5 8.5v-2l1.6-.2a5 5 0 01.7-1.6l-.8-1.4 1.4-1.4 1.4.8a5 5 0 011.6-.7l.2-1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Settings panel (hidden by default) -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <label class="settings-label">
+        <span>Port</span>
+        <input type="number" id="port-input" class="settings-input" min="1" max="65535">
+      </label>
+      <div class="settings-actions">
+        <button id="settings-save" class="btn btn-sm">Save</button>
+      </div>
+    </div>
+
+    <!-- State: Checking connection -->
+    <div id="state-checking" class="state">
+      <div class="spinner"></div>
+      <p class="state-text">Connecting to desktop app...</p>
+    </div>
+
+    <!-- State: App not running -->
+    <div id="state-offline" class="state hidden">
+      <div class="state-icon state-icon-warn">!</div>
+      <p class="state-text">Budget Itemizer is not running</p>
+      <p class="state-hint">Start the desktop app and try again.</p>
+      <button id="retry-btn" class="btn">Retry</button>
+    </div>
+
+    <!-- State: Ready to capture -->
+    <div id="state-ready" class="state hidden">
+      <button id="capture-btn" class="btn btn-primary btn-large">
+        Capture This Page
+      </button>
+      <button id="capture-all-btn" class="btn btn-large">
+        Capture All Orders
+      </button>
+      <p class="state-hint">Saves pages as PDFs to your Budget Itemizer inbox.</p>
+    </div>
+
+    <!-- State: Picking a link -->
+    <div id="state-picking" class="state hidden">
+      <div class="spinner"></div>
+      <p class="state-text">Click the first order link on the page</p>
+      <p class="state-hint">This teaches the extension which links are orders.</p>
+      <button id="cancel-pick-btn" class="btn">Cancel</button>
+    </div>
+
+    <!-- State: Confirm batch -->
+    <div id="state-confirm" class="state hidden">
+      <p class="state-text">Found <span id="link-count">0</span> order links</p>
+      <div id="link-list" class="link-list"></div>
+      <div class="done-actions">
+        <button id="batch-start-btn" class="btn btn-primary">Capture All</button>
+        <button id="batch-cancel-btn" class="btn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- State: Batch progress -->
+    <div id="state-batch-progress" class="state hidden">
+      <div class="spinner"></div>
+      <p class="state-text batch-status">Capturing <span id="batch-current">0</span> of <span id="batch-total">0</span></p>
+      <p class="state-hint" id="batch-page-title"></p>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+
+    <!-- State: Batch done -->
+    <div id="state-batch-done" class="state hidden">
+      <div class="done-check">&#10003;</div>
+      <p class="state-text" id="batch-done-text">Captured 0 orders</p>
+      <p class="state-hint hidden" id="batch-errors-text"></p>
+      <button id="batch-done-btn" class="btn">Done</button>
+    </div>
+
+    <!-- State: Capturing -->
+    <div id="state-capturing" class="state hidden">
+      <div class="spinner"></div>
+      <p class="state-text">Capturing page...</p>
+    </div>
+
+    <!-- State: Done -->
+    <div id="state-done" class="state hidden">
+      <div class="done-check">&#10003;</div>
+      <p class="state-text">Sent to Budget Itemizer</p>
+      <p class="state-hint">The receipt will appear in your desktop app for review.</p>
+      <div class="done-actions">
+        <button id="capture-another-btn" class="btn">Capture Another</button>
+      </div>
+    </div>
+
+    <!-- State: Error -->
+    <div id="state-error" class="state hidden">
+      <div class="state-icon state-icon-error">&#10007;</div>
+      <p class="state-text">Something went wrong</p>
+      <p class="state-hint" id="error-message"></p>
+      <button id="error-retry-btn" class="btn">Try Again</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

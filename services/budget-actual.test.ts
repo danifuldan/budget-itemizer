@@ -1,0 +1,229 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock @actual-app/api before importing the provider
+vi.mock("@actual-app/api", () => ({
+  init: vi.fn(),
+  downloadBudget: vi.fn(),
+  shutdown: vi.fn(),
+  sync: vi.fn(),
+  getCategories: vi.fn(),
+  getAccounts: vi.fn(),
+  getBudgets: vi.fn(),
+  getPayees: vi.fn(),
+  createPayee: vi.fn(),
+  getTransactions: vi.fn(),
+  addTransactions: vi.fn(),
+  updateTransaction: vi.fn(),
+}));
+
+// Mock config
+vi.mock("./config", () => ({
+  getConfig: vi.fn(() => ({
+    actualServerUrl: "http://localhost:5006",
+    actualPassword: "test-password",
+    actualSyncId: "test-sync-id",
+    matchAcrossAccounts: false,
+  })),
+}));
+
+import * as api from "@actual-app/api";
+import { ActualBudgetProvider } from "./budget-actual";
+
+const mockApi = vi.mocked(api);
+
+describe("ActualBudgetProvider", () => {
+  let provider: ActualBudgetProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset module-level state by creating fresh provider and forcing reconnect
+    provider = new ActualBudgetProvider();
+    // Reset the connection state by calling shutdown
+    // We need to re-import to reset module state, but simpler to just test fresh
+  });
+
+  describe("getAllCategories", () => {
+    it("excludes income and hidden categories", async () => {
+      mockApi.getCategories.mockResolvedValue([
+        { id: "1", name: "Groceries", is_income: false, hidden: false, group_id: "g1" },
+        { id: "2", name: "Income", is_income: true, hidden: false, group_id: "g2" },
+        { id: "3", name: "Old Category", is_income: false, hidden: true, group_id: "g1" },
+        { id: "4", name: "Utilities", is_income: false, hidden: false, group_id: "g1" },
+      ] as any);
+      mockApi.getAccounts.mockResolvedValue([]);
+
+      const categories = await provider.getAllCategories();
+      expect(categories).toEqual(["Groceries", "Utilities"]);
+      expect(categories).not.toContain("Income");
+      expect(categories).not.toContain("Old Category");
+    });
+  });
+
+  describe("getAllAccounts", () => {
+    it("excludes closed and offbudget accounts", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+        { id: "a2", name: "Savings", closed: false, offbudget: true },
+        { id: "a3", name: "Old Account", closed: true, offbudget: false },
+        { id: "a4", name: "Credit Card", closed: false, offbudget: false },
+      ] as any);
+
+      const accounts = await provider.getAllAccounts();
+      expect(accounts).toEqual(["Checking", "Credit Card"]);
+      expect(accounts).not.toContain("Savings");
+      expect(accounts).not.toContain("Old Account");
+    });
+  });
+
+  describe("createTransaction", () => {
+    it("converts dollars to cents (negative for expenses)", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "Groceries", is_income: false, hidden: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([]);
+      mockApi.createPayee.mockResolvedValue("p1");
+      mockApi.addTransactions.mockResolvedValue(undefined as any);
+
+      await provider.createTransaction(
+        "Checking",
+        "Walmart",
+        "Groceries",
+        "2026-03-15",
+        "Weekly groceries",
+        12.99,
+      );
+
+      expect(mockApi.addTransactions).toHaveBeenCalledWith("a1", [
+        expect.objectContaining({
+          amount: -1299,
+          account: "a1",
+          date: "2026-03-15",
+          payee: "p1",
+          notes: "Weekly groceries",
+          category: "c1",
+        }),
+      ]);
+    });
+
+    it("uses buildSubtransactionSplits with tax category resolution", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "Groceries", is_income: false, hidden: false },
+        { id: "c2", name: "Sales Tax", is_income: false, hidden: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([{ id: "p1", name: "Amazon" }] as any);
+      mockApi.addTransactions.mockResolvedValue(undefined as any);
+
+      await provider.createTransaction(
+        "Checking",
+        "Amazon",
+        "Groceries",
+        "2026-03-15",
+        "Order",
+        15.00,
+        [
+          { category: "Groceries", amount: 12.99, memo: "Items" },
+          { category: "", amount: 2.01, memo: "Tax/fees" },
+        ],
+      );
+
+      // The Actual API takes `category` (not `category_id`) on subtransactions.
+      // The test previously asserted the wrong field name; updated to match.
+      expect(mockApi.addTransactions).toHaveBeenCalledWith("a1", [
+        expect.objectContaining({
+          amount: -1500,
+          subtransactions: expect.arrayContaining([
+            expect.objectContaining({ amount: -1299, category: "c1", notes: "Items" }),
+            expect.objectContaining({ amount: -201, category: "c2", notes: "Tax/fees" }),
+          ]),
+        }),
+      ]);
+    });
+  });
+
+  describe("findMatchingTransaction", () => {
+    it("returns match by amount + vendor + date", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([
+        { id: "p1", name: "Walmart Supercenter" },
+      ] as any);
+      mockApi.getTransactions.mockResolvedValue([
+        { id: "t1", amount: -1299, date: "2026-03-15", payee: "p1" },
+      ] as any);
+
+      const match = await provider.findMatchingTransaction(
+        "Checking",
+        12.99,
+        "2026-03-15",
+        "Walmart",
+      );
+      expect(match).toEqual({ id: "t1" });
+    });
+
+    it("returns null when amount doesn't match", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([{ id: "p1", name: "Walmart" }] as any);
+      mockApi.getTransactions.mockResolvedValue([
+        { id: "t1", amount: -5000, date: "2026-03-15", payee: "p1" },
+      ] as any);
+
+      const match = await provider.findMatchingTransaction(
+        "Checking",
+        12.99,
+        "2026-03-15",
+        "Walmart",
+      );
+      expect(match).toBeNull();
+    });
+
+    // Vendor is a tiebreaker, not a hard filter. A lone same-amount,
+    // same-date candidate still attaches even if the payee disagrees.
+    it("still matches a lone same-amount candidate when payee disagrees (vendor is tiebreaker only)", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([{ id: "p1", name: "Target" }] as any);
+      mockApi.getTransactions.mockResolvedValue([
+        { id: "t1", amount: -1299, date: "2026-03-15", payee: "p1" },
+      ] as any);
+
+      const match = await provider.findMatchingTransaction(
+        "Checking",
+        12.99,
+        "2026-03-15",
+        "Walmart",
+      );
+      expect(match?.id).toBe("t1");
+    });
+  });
+
+  describe("shutdown", () => {
+    it("resets connection state", async () => {
+      // First connect
+      await provider.getAllCategories().catch(() => {});
+
+      await provider.shutdown();
+
+      expect(mockApi.shutdown).toHaveBeenCalled();
+
+      // After shutdown, next call should re-init
+      mockApi.init.mockClear();
+      mockApi.downloadBudget.mockClear();
+      mockApi.getCategories.mockResolvedValue([]);
+
+      await provider.getAllCategories();
+
+      expect(mockApi.init).toHaveBeenCalled();
+      expect(mockApi.downloadBudget).toHaveBeenCalled();
+    });
+  });
+});

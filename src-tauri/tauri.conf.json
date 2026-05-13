@@ -1,0 +1,59 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Budget Itemizer",
+  "version": "0.1.0",
+  "identifier": "com.budget-itemizer.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev:frontend",
+    "beforeBuildCommand": "npm run build:server && npm run build:frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "",
+        "width": 580,
+        "height": 760,
+        "minWidth": 480,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://localhost:* https://tauri.localhost; img-src 'self' data: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/budget-itemizer-server",
+      "binaries/llama-server",
+      "binaries/swift-sidecar"
+    ],
+    "resources": [
+      "binaries/*.dylib"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/danifuldan/budget-itemizer/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3QzI5QTA5QzRGOENBNjAKUldSZ3l2akVDWnJDbDdzZXk5YkI2S1RQL3YvTm0rOEdQU3BkWlVoWnhrZ2FlM2MyYS9jY01GcHEK"
+    }
+  }
+}

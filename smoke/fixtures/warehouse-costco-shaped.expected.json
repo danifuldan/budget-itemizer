@@ -1,0 +1,38 @@
+{
+  "merchant": "Costco Wholesale",
+  "transactionDate": "2026-10-22",
+  "totalAmount": 53.24,
+  "tax": 1.32,
+  "shipping": 0,
+  "fees": 0,
+  "discount": 0,
+  "credit": 0,
+  "refund": 0,
+  "lineItems": [
+    {
+      "productName": "KS PAPER TOWELS 12RL",
+      "quantity": 1,
+      "lineItemTotalAmount": 21.99
+    },
+    {
+      "productName": "KS BTL WATER 35PK",
+      "quantity": 2,
+      "lineItemTotalAmount": 7.98
+    },
+    {
+      "productName": "ROTISSERIE CHICKEN",
+      "quantity": 1,
+      "lineItemTotalAmount": 4.99
+    },
+    {
+      "productName": "KS PEANUTS 640Z",
+      "quantity": 1,
+      "lineItemTotalAmount": 12.49
+    },
+    {
+      "productName": "KS BANANAS 3LB",
+      "quantity": 3,
+      "lineItemTotalAmount": 4.47
+    }
+  ]
+}

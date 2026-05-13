@@ -1,0 +1,97 @@
+# Project-specific Semgrep rules for Budget Itemizer.
+#
+# Run: `semgrep --config=.semgrep/ .`
+# Gated via .husky/pre-commit (also runs the upstream rule packs).
+#
+# Plain-English version of each rule: SEMGREP-RULES.md.
+# Why this file exists: SEMGREP-RULES.md and the 2026-05-12
+# adversarial code review (`tmp/code-review-adversarial-2026-05-12.md`).
+#
+# Adding a new rule:
+#   1. Confirm the invariant: name the bug class it prevents.
+#   2. Write the rule below with a paragraph in `message` explaining the
+#      fix the developer should apply.
+#   3. Run `semgrep --config=.semgrep/ .` to confirm zero false positives
+#      on the current tree. If a finding fires, either the rule is wrong
+#      or the existing code has a bug (fix it before merging the rule).
+
+rules:
+  # ─────────────────────────────────────────────────────────────────
+  # Rule 1: Files under ~/.config/budget-itemizer/ must use the safe helper.
+  #
+  # Background: history.json and categories.cache.json were originally
+  # written with default umask (0o644), leaking purchase history to any
+  # same-user process. The fix was to extract `writeRestrictedFile` and
+  # route every writer through it. This rule prevents the regression.
+  # ─────────────────────────────────────────────────────────────────
+  - id: budget-itemizer-config-dir-uses-restricted-helper
+    message: |
+      Files under ~/.config/budget-itemizer/ must be written via
+      writeRestrictedFile() (utils/restricted-file.ts), not raw
+      fs.writeFileSync. Raw writes default to 0o644 — readable by any
+      process on the system. The helper enforces 0o600 + chmod-after-
+      write so existing files don't keep loose permissions across saves.
+    severity: ERROR
+    languages: [typescript, javascript]
+    patterns:
+      - pattern-either:
+          - pattern: fs.writeFileSync($PATH, ...)
+          - pattern: writeFileSync($PATH, ...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: '.*(CONFIG_FILE|CONFIG_DIR|HISTORY_FILE|HISTORY_DIR|categories\.cache|budget-itemizer).*'
+
+  # ─────────────────────────────────────────────────────────────────
+  # Rule 2: No execSync with shell-interpreted template strings.
+  #
+  # Background: services/llama-server.ts originally used
+  # `execSync(\`lsof -ti tcp:${port}\`)` and `execSync(\`kill ${pids.join(" ")}\`)`.
+  # Even with numeric inputs (safe today), the *pattern* of "string-glue
+  # into shell" is dangerous and one rename away from a real injection.
+  # The fix is execFileSync with an argv array — no shell, no interpolation.
+  # ─────────────────────────────────────────────────────────────────
+  - id: budget-itemizer-no-shell-execsync
+    message: |
+      execSync with a template-string command runs through a shell, which
+      interprets metacharacters. Use execFileSync (or execFile) with an
+      argv array instead:
+        execFileSync("kill", [pid])           // safe
+      not:
+        execSync(`kill ${pid}`)                // shell-injection class
+      Even if today's input is numeric, this pattern is one rename
+      away from a real vulnerability.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: execSync(`...`)
+      - pattern: execSync(`...`, ...)
+      - pattern: execSync(`...${$X}...`)
+      - pattern: execSync(`...${$X}...`, ...)
+
+  # ─────────────────────────────────────────────────────────────────
+  # Rule 3: Uploaded filenames must be sanitized before fs use.
+  #
+  # Background: adversarial testing found two crash modes — filename
+  # `"......"` sanitized to empty string then `fs.writeFileSync(inboxPath,
+  # ...)` hit EISDIR; filename of 4096 chars hit ENAMETOOLONG. Both fixed
+  # by routing every upload path through `sanitizeReceiptFilename` (which
+  # returns null on unsafe input, prompting a 400 response). This rule
+  # prevents the next upload route from skipping that gate.
+  # ─────────────────────────────────────────────────────────────────
+  - id: budget-itemizer-upload-must-sanitize-filename
+    message: |
+      When building a filesystem path from a user-supplied filename, run
+      it through sanitizeReceiptFilename(file.name) and bail if the
+      result is null. Direct path.join(inboxPath, file.name) crashes on
+      empty/all-dots/overlong names with EISDIR or ENAMETOOLONG.
+      See app.ts sanitizeReceiptFilename for the canonical pattern.
+    severity: ERROR
+    languages: [typescript, javascript]
+    patterns:
+      - pattern-either:
+          - pattern: path.join($DIR, $FILE.name)
+          - pattern: path.join($DIR, $FILE.filename)
+          - pattern: path.join($DIR, $FILE["name"])
+      - metavariable-regex:
+          metavariable: $DIR
+          regex: '.*(inbox|processed|Inbox|Processed)Path?.*'

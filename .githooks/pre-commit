@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Pre-commit gate for Budget Itemizer.
+#
+# Runs deterministic checks before every commit:
+#   1. Custom Semgrep rules (.semgrep/) — codebase-specific invariants.
+#   2. Upstream Semgrep packs — TS/Node/React/security/secrets/OWASP.
+#   3. TypeScript typecheck — project source only.
+#
+# To enable on a fresh clone: `git config core.hooksPath .githooks`
+# To bypass once (NOT a habit): `git commit --no-verify`
+#
+# Skipping with --no-verify is the wrong default. The hook exists to
+# catch the bug *before* it lands; bypassing it routinely defeats the
+# discipline entirely.
+
+set -e
+
+# Only run if anything code-like is staged. Pure docs/asset commits skip.
+if ! git diff --cached --name-only --diff-filter=ACM | grep -qE '\.(ts|tsx|js|mjs|cjs|rs|swift)$'; then
+  exit 0
+fi
+
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
+# 1. Custom rules — fast, project-specific.
+if command -v semgrep >/dev/null 2>&1; then
+  echo "▶ Semgrep (custom rules)"
+  semgrep --config=.semgrep/ --error --quiet \
+    --exclude=node_modules --exclude=src-tauri/target --exclude=dist --exclude=dist-server \
+    --exclude=swift-sidecar/.build --exclude=tmp \
+    || { echo "✗ Custom rule violation. Fix or run \`git commit --no-verify\` if you genuinely accept it."; exit 1; }
+
+  # 2. Upstream packs.
+  echo "▶ Semgrep (upstream packs)"
+  semgrep --config=p/typescript --config=p/nodejs --config=p/react \
+          --config=p/security-audit --config=p/secrets --config=p/owasp-top-ten \
+          --error --quiet \
+          --exclude=node_modules --exclude=src-tauri/target --exclude=dist --exclude=dist-server \
+          --exclude=swift-sidecar/.build --exclude=tmp \
+    || { echo "✗ Upstream Semgrep finding. Inspect output above."; exit 1; }
+else
+  echo "⚠ semgrep not installed — skipping SAST checks."
+  echo "  Install:   brew install semgrep"
+fi
+
+# 3. TypeScript typecheck — catches type drift the runtime would surface later.
+echo "▶ TypeScript typecheck"
+npx tsc --noEmit -p tsconfig.json --skipLibCheck 2>&1 | grep -v "src-tauri/target\|node_modules" | (! grep -q "error TS") \
+  || { echo "✗ TypeScript errors. Fix before committing."; exit 1; }
+
+echo "✓ All pre-commit checks passed."

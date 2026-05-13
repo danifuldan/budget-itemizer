@@ -1,0 +1,28 @@
+{
+  "merchant": "Amazon.com",
+  "transactionDate": "2026-10-05",
+  "totalAmount": 86.28,
+  "tax": 6.86,
+  "shipping": 0,
+  "fees": 0,
+  "discount": 0,
+  "credit": 0,
+  "refund": 0,
+  "lineItems": [
+    {
+      "productName": "Cotton bed sheet set, queen, slate blue",
+      "quantity": 1,
+      "lineItemTotalAmount": 38.45
+    },
+    {
+      "productName": "2 Stainless steel water bottle, 24oz",
+      "quantity": 2,
+      "lineItemTotalAmount": 31.98
+    },
+    {
+      "productName": "USB-C cable, braided, Gft",
+      "quantity": 1,
+      "lineItemTotalAmount": 8.99
+    }
+  ]
+}
