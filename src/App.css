@@ -737,6 +737,41 @@ body::after {
   box-shadow: 0 0 5px rgba(255, 106, 64, 0.45);
 }
 
+/* Indeterminate progress bar shown next to "Loading AI model…" in the
+   status bar. We don't know the actual completion percentage —
+   llama-server doesn't expose per-stage progress through health checks —
+   so a shuttle animation communicates "yes, something is happening"
+   without claiming false precision. The bar disappears once llmReady
+   flips true. */
+.ai-progress {
+  display: inline-block;
+  width: 48px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.ai-progress::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -35%;
+  width: 35%;
+  height: 100%;
+  background: var(--accent-text);
+  border-radius: 2px;
+  animation: ai-progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes ai-progress-slide {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}
+
 .gear-btn {
   margin-left: auto;
   background: none;

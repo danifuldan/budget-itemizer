@@ -95,6 +95,9 @@ export default function StatusBar({ watcherRunning, watcherPath, watcherInboxExi
         <button className="status-link" onClick={onSettingsClick} aria-label={`${aiLabel}. Open settings.`}>
           {aiLabel}
         </button>
+        {setupComplete && !llmReady && (
+          <span className="ai-progress" aria-hidden="true" />
+        )}
         <button
           className="gear-btn"
           aria-label={`Theme: ${themeLabel[themePreference]}. Click to change.`}
