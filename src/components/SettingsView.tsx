@@ -508,11 +508,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           </div>
           <div className="toggle-row">
             <div>
-              <div className="toggle-label">Enable watcher</div>
+              <div className="toggle-label">Watch inbox folder for new receipts</div>
+              <div className="toggle-desc">Automatically pick up PDFs dropped into the inbox folder above</div>
             </div>
             <Toggle
               on={watcherEnabled}
-              ariaLabel="Enable folder watcher"
+              ariaLabel="Watch inbox folder for new receipts"
               onChange={async (on) => {
                 setWatcherEnabled(on);
                 try {
@@ -525,7 +526,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           <div className="toggle-row">
             <div>
               <div className="toggle-label">Auto-import without review</div>
-              <div className="toggle-desc">Skip the review screen for watched files</div>
+              <div className="toggle-desc">Skip review for files picked up from the inbox folder</div>
             </div>
             <Toggle on={autoImport} onChange={setAutoImport} ariaLabel="Auto-import without review" />
           </div>
