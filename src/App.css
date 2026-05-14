@@ -2135,7 +2135,11 @@ body::after {
 .settings-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0 16px 16px;
+  /* No bottom padding — .settings-save is sticky with bottom: 0 and has
+     its own internal bottom padding (16px) for the footer-links row.
+     Bottom padding here would create a gap below the sticky element
+     showing scrollable content through it. */
+  padding: 0 16px 0;
 }
 
 .settings-header .btn-ghost {
