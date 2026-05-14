@@ -46,8 +46,11 @@ function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }
       </div>
     );
   }
+  // useAppUpdate already maps known error classes to user-facing strings
+  // (e.g., "Couldn't reach update server") and treats 404 / no-manifest as
+  // the up-to-date case (no error set), so we just render whatever it gave us.
   const status = error
-    ? "Update check failed"
+    ? error
     : checking
     ? "Checking for updates…"
     : "Up to date";

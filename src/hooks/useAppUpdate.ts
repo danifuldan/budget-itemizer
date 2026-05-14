@@ -49,13 +49,28 @@ export function useAppUpdate() {
       return null;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
+      const lower = msg.toLowerCase();
       // Not-in-Tauri-context (dev mode) is never an error to surface.
-      const isDevModeNotImplemented = msg.toLowerCase().includes("not implemented");
-      if (surfaceErrors && !isDevModeNotImplemented) {
-        setError(msg);
+      if (lower.includes("not implemented")) {
+        console.debug("[updater] not in Tauri context");
+        return null;
+      }
+      // 404 / no-manifest case: a missing latest.json means the publisher
+      // hasn't cut a release yet. To the user this is identical to "you're
+      // up to date" — no version newer than what you have exists. Don't
+      // surface as an error.
+      const isNoManifest = ["release json", "404", "not found", "could not fetch"].some((s) => lower.includes(s));
+      if (isNoManifest) {
+        setAvailable(null);
+        return null;
+      }
+      // Network-class errors are recoverable on the user's side (turn on
+      // wifi, reconnect, try again). Distinguish from real failures so
+      // the UI message can be reassuring instead of alarming.
+      const isUnreachable = ["connect", "timeout", "dns", "network", "fetch failed", "send request"].some((s) => lower.includes(s));
+      if (surfaceErrors) {
+        setError(isUnreachable ? "Couldn't reach update server" : "Update check failed");
       } else {
-        // Log to console so a debugging user can see what happened,
-        // but don't show a scary message in the UI.
         console.debug("[updater] check failed silently:", msg);
       }
       return null;
