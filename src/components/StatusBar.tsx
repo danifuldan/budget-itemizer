@@ -66,8 +66,8 @@ export default function StatusBar({ watcherRunning, watcherPath, watcherInboxExi
   const aiLabel = !setupComplete
     ? "Setup needed"
     : llmReady
-      ? "AI Ready"
-      : "LLM loading\u2026";
+      ? "AI ready"
+      : "Loading AI model\u2026";
   const aiDotColor = !setupComplete
     ? "yellow"
     : llmReady

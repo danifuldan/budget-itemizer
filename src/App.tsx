@@ -613,15 +613,10 @@ export default function App() {
     );
   }
 
-  // Status loaded but the AI model is still warming up — keep the splash
-  // showing the more specific phase until llama-server is ready. Skip
-  // this gate when setup isn't complete (the wizard handles model setup
-  // itself).
-  if (statusLoaded && status.setupComplete && !status.llmReady && state.view !== "setup" && state.view !== "settings") {
-    return <SplashScreen phase="starting-ai" />;
-  }
-
   // Setup wizard: show if explicitly navigated, or if setup not complete (and not dismissed)
+  // (No splash gate for `!llmReady` — the main UI renders during AI warmup;
+  // the DropZone disables drops with an inline message and the StatusBar's
+  // bottom-right AI indicator shows "Loading AI model".)
   if (state.view === "setup" || (state.view === "main" && !status.setupComplete && !state.setupDismissed)) {
     return (
       <SetupWizard
@@ -765,7 +760,7 @@ export default function App() {
           {appUpdate.available && <span className="gear-update-dot" aria-hidden="true" />}
         </button>
       </TitlebarRegion>
-      <DropZone onFile={handleFile} />
+      <DropZone onFile={handleFile} llmReady={status.llmReady} />
       <PendingList
         files={pendingFiles}
         onReview={handleReviewPending}
