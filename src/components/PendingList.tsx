@@ -8,6 +8,10 @@ interface PendingListProps {
   onImport: (filename: string) => void;
   importingFile: string | null;
   progressMap?: Record<string, number>;
+  /** When the LLM is still warming up, `parsing` entries are actually
+   *  waiting for llama-server to come online — surface that distinction
+   *  in the row label so the user understands the delay. */
+  llmReady: boolean;
 }
 
 /** Track which filenames have already been rendered so only new ones animate. */
@@ -44,7 +48,7 @@ function formatAmount(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
 
-export default function PendingList({ files, onReview, onSkip, onImport, importingFile, progressMap = {} }: PendingListProps) {
+export default function PendingList({ files, onReview, onSkip, onImport, importingFile, progressMap = {}, llmReady }: PendingListProps) {
   const newKeys = useNewItemKeys(files);
 
   if (files.length === 0) return null;
@@ -61,8 +65,9 @@ export default function PendingList({ files, onReview, onSkip, onImport, importi
         const ariaLabel = file.status === "ready" && file.receipt
           ? `Review ${file.receipt.merchant}, ${formatAmount(file.receipt.totalAmount)}`
           : `Review ${file.filename}`;
+        const isWaitingForLlm = file.status === "parsing" && !llmReady;
         return (
-          <div key={file.filename} className={`pending-item${newKeys.has(file.filename) ? " animate-in" : ""}`}>
+          <div key={file.filename} className={`pending-item${newKeys.has(file.filename) ? " animate-in" : ""}${isWaitingForLlm ? " waiting-for-llm" : ""}`}>
             {progress != null && progress < 1 && (
               <div
                 className="pending-progress-fill"
@@ -77,11 +82,11 @@ export default function PendingList({ files, onReview, onSkip, onImport, importi
                 onClick={() => onReview(file.filename)}
                 aria-label={ariaLabel}
               >
-                <PendingItemBody file={file} />
+                <PendingItemBody file={file} llmReady={llmReady} />
               </button>
             ) : (
               <div className="pending-item-info">
-                <PendingItemBody file={file} />
+                <PendingItemBody file={file} llmReady={llmReady} />
               </div>
             )}
             <div className="pending-item-actions">
@@ -108,7 +113,7 @@ export default function PendingList({ files, onReview, onSkip, onImport, importi
   );
 }
 
-function PendingItemBody({ file }: { file: PendingFileInfo }) {
+function PendingItemBody({ file, llmReady }: { file: PendingFileInfo; llmReady: boolean }) {
   if (file.status === "ready" && file.receipt) {
     return (
       <>
@@ -131,11 +136,14 @@ function PendingItemBody({ file }: { file: PendingFileInfo }) {
       </>
     );
   }
+  // status === "parsing": either actively being parsed, OR queued waiting for
+  // the LLM to warm up. The label distinguishes so the user knows why a
+  // post-launch drop hasn't started moving yet.
   return (
     <>
       <div className="pending-item-name">{file.filename}</div>
       <div className="pending-item-detail pending-parsing" aria-live="polite">
-        Parsing&hellip;
+        {llmReady ? "Parsing…" : "Loading AI model…"}
       </div>
     </>
   );

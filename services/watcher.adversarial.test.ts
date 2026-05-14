@@ -54,6 +54,12 @@ vi.mock("./budget-provider", () => ({
 vi.mock("./history", () => ({
   addRecord: vi.fn(),
 }));
+// queueFile waits for the llama-server health check before parsing — in
+// these tests we don't spin up a real server, so report it as ready and
+// let the (mocked) parser drive the rest.
+vi.mock("./llama-server", () => ({
+  isLlamaServerRunning: vi.fn(() => true),
+}));
 
 import { moveToProcessed, startWatcher, stopWatcher, getWatcherStatus, queueFile } from "./watcher";
 

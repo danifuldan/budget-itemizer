@@ -2,22 +2,14 @@ import { useState, useRef, type DragEvent, type KeyboardEvent } from "react";
 
 interface DropZoneProps {
   onFile: (file: File) => void;
-  /** When false, the drop zone shows a non-actionable "AI model loading"
-   *  state — drops bounce, the file picker doesn't open. Prevents drops
-   *  from reaching the parse endpoint before llama-server is up (which
-   *  would surface as a confusing error). */
-  llmReady: boolean;
 }
 
-export default function DropZone({ onFile, llmReady }: DropZoneProps) {
+export default function DropZone({ onFile }: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const disabled = !llmReady;
-
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
-    if (disabled) return;
     setIsDragging(true);
   };
 
@@ -29,7 +21,6 @@ export default function DropZone({ onFile, llmReady }: DropZoneProps) {
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file?.type === "application/pdf") {
       onFile(file);
@@ -37,12 +28,10 @@ export default function DropZone({ onFile, llmReady }: DropZoneProps) {
   };
 
   const handleClick = () => {
-    if (disabled) return;
     inputRef.current?.click();
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (disabled) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       handleClick();
@@ -61,18 +50,13 @@ export default function DropZone({ onFile, llmReady }: DropZoneProps) {
     <div className="dropzone-area">
       <button
         type="button"
-        className={`dropzone${isDragging ? " dragging" : ""}${disabled ? " disabled" : ""}`}
+        className={`dropzone${isDragging ? " dragging" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
-        aria-label={
-          disabled
-            ? "Loading AI model. Drops will be accepted once the model is ready."
-            : "Drop a receipt PDF or click to browse for a file"
-        }
-        aria-disabled={disabled}
+        aria-label="Drop a receipt PDF or click to browse for a file"
       >
         <svg
           className="dropzone-icon"
@@ -91,12 +75,8 @@ export default function DropZone({ onFile, llmReady }: DropZoneProps) {
           <path d="M26 39v9" />
           <path d="M22 44l4 4 4-4" />
         </svg>
-        <span className="dropzone-label">
-          {disabled ? "Loading AI model…" : "Drop a receipt PDF here"}
-        </span>
-        <span className="dropzone-hint">
-          {disabled ? "Drops accepted once the model is ready" : "or click to browse"}
-        </span>
+        <span className="dropzone-label">Drop a receipt PDF here</span>
+        <span className="dropzone-hint">or click to browse</span>
       </button>
       <input
         ref={inputRef}

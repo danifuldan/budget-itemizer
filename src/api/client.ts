@@ -221,6 +221,38 @@ async function readSSEStream(
   }
 }
 
+/**
+ * Drop the file into the watcher inbox without entering the review flow.
+ * Used when the LLM isn't warmed up yet — the watcher's queueFile waits
+ * for llama-server, then parses, then the pending list updates. From the
+ * user's POV: file appears in the pending list right away, marked as
+ * "Loading AI model" while waiting, then transitions to ready normally.
+ */
+export async function uploadToInbox(file: File): Promise<void> {
+  const auth = await ensureAuth();
+  const form = new FormData();
+  form.append("file", file);
+  let res = await fetch(`${API_BASE}/watcher/inbox`, {
+    method: "POST",
+    headers: { Authorization: auth },
+    body: form,
+  });
+  if (res.status === 401) {
+    const freshAuth = await refreshAuth();
+    const retry = new FormData();
+    retry.append("file", file);
+    res = await fetch(`${API_BASE}/watcher/inbox`, {
+      method: "POST",
+      headers: { Authorization: freshAuth },
+      body: retry,
+    });
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new ApiError(res.status, body, parseRetryAfter(res.headers.get("Retry-After")));
+  }
+}
+
 export function streamParse(
   file: File,
   onEvent: (event: SSEEvent) => void,

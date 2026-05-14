@@ -1,5 +1,5 @@
 import { useReducer, useEffect, useCallback, useState, useRef } from "react";
-import { apiPost, initFailure } from "./api/client";
+import { apiPost, initFailure, uploadToInbox } from "./api/client";
 import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportRecord } from "./api/types";
 import { useHistory } from "./hooks/useHistory";
 import { useStatus } from "./hooks/useStatus";
@@ -449,6 +449,17 @@ export default function App() {
   }, [accounts, appConfig.defaultAccount]);
 
   const handleFile = (file: File) => {
+    // If the LLM is still warming up, don't enter the review flow — the
+    // parse will fail. Drop the file into the watcher inbox instead; the
+    // backend's queueFile waits for llama-server, then parses, and the
+    // pending list updates on its own. The user sees the file appear in
+    // the pending list with a "Loading AI model" hint until LLM ready.
+    if (!status.llmReady) {
+      uploadToInbox(file)
+        .then(() => fetchPending())
+        .catch((err) => console.error("uploadToInbox failed:", err));
+      return;
+    }
     dispatch({ type: "SET_SOURCE_FILE", filename: "" });
     startStream(file);
   };
@@ -760,7 +771,7 @@ export default function App() {
           {appUpdate.available && <span className="gear-update-dot" aria-hidden="true" />}
         </button>
       </TitlebarRegion>
-      <DropZone onFile={handleFile} llmReady={status.llmReady} />
+      <DropZone onFile={handleFile} />
       <PendingList
         files={pendingFiles}
         onReview={handleReviewPending}
@@ -768,6 +779,7 @@ export default function App() {
         onImport={handleQuickImport}
         importingFile={importingFile}
         progressMap={progressMap}
+        llmReady={status.llmReady}
       />
       <HistoryList history={history} onView={handleViewHistory} onRemove={remove} />
       <StatusBar

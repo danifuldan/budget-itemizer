@@ -3,6 +3,7 @@ import * as path from "path";
 import { EventEmitter } from "events";
 import type { Receipt } from "./shared-types";
 import { importReceipt, parseImageReceiptStream } from "./receipt";
+import { isLlamaServerRunning } from "./llama-server";
 import { BudgetConnectionError } from "./budget-provider";
 import { addRecord } from "./history";
 import { getConfig } from "./config";
@@ -383,6 +384,15 @@ export const queueFile = async (filePath: string, autoImport = false) => {
   pendingFiles.set(filename, entry);
   console.log(`  Queued for review: ${filename}`);
   watcherEvents.emit("file-queued", entry);
+
+  // Drops during LLM warmup arrive before llama-server's health check
+  // returns. Without this wait, parseImageReceiptStream throws on its
+  // first callLLM. Poll until the server's up; the entry sits in the
+  // pending list as "parsing" the whole time, and the FE shows a
+  // "Loading AI model" hint when status.llmReady is false.
+  while (!isLlamaServerRunning()) {
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
 
   try {
     const buffer = fs.readFileSync(filePath);

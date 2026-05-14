@@ -20,6 +20,11 @@ vi.mock("./receipt", async () => {
     }),
   };
 });
+// queueFile waits for llama-server before parsing; report ready so the
+// oversize-rejection path (which fires before the wait) is unaffected.
+vi.mock("./llama-server", () => ({
+  isLlamaServerRunning: vi.fn(() => true),
+}));
 
 import {
   queueFile,

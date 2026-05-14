@@ -303,22 +303,6 @@ body::after {
   background: var(--accent-tint);
 }
 
-.dropzone.disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.dropzone.disabled:hover {
-  border-color: var(--border-strong);
-  border-style: dashed;
-  background: transparent;
-}
-
-.dropzone.disabled:hover .dropzone-icon {
-  color: var(--text-3);
-  opacity: 0.65;
-  transform: none;
-}
 
 .dropzone-icon {
   width: 50px;
@@ -384,6 +368,13 @@ body::after {
   border-top: 1px solid var(--border);
   transition: background var(--transition);
   position: relative;
+}
+
+/* Dropped while the LLM was still warming up — the entry sits in the
+   pending list with status "parsing", waiting for the backend to
+   actually start. Dim so it visually reads as "not yet running". */
+.pending-item.waiting-for-llm {
+  opacity: 0.6;
 }
 
 .pending-progress-fill {
