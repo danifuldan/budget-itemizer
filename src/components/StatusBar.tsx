@@ -96,7 +96,10 @@ export default function StatusBar({ watcherRunning, watcherPath, watcherInboxExi
           {aiLabel}
         </button>
         {setupComplete && !llmReady && (
-          <span className="ai-progress" aria-hidden="true" />
+          <svg className="ai-spinner" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" fill="none" opacity="0.25" />
+            <path d="M21 12 a9 9 0 0 1 -9 9" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
+          </svg>
         )}
         <button
           className="gear-btn"
