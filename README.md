@@ -1,6 +1,8 @@
 # Budget Itemizer
 
-**Split and categorize your online receipts in YNAB — free, local, and private.**
+**Know how much you're *really* spending — receipt by receipt, line by line.**
+
+<!-- Screenshot or short demo GIF goes here. Recommended: a clip showing a PDF drop → review → import flow. -->
 
 ## What it is
 
@@ -16,9 +18,7 @@ Drop a PDF into the inbox folder or drag it into the app window, and watch it go
 2. **Review the split** — The AI parses line items and maps them to your YNAB categories. Edit anything it got wrong.
 3. **Import to YNAB** — One click and the split transaction lands in your budget.
 
-## Architecture
-
-Budget Itemizer is a Tauri desktop app — a Rust shell wrapping a React frontend, with a Node.js backend running as a sidecar process. The local-first promise drove every architectural choice. Tauri over Electron keeps the binary small. The Node sidecar handles PDF extraction, LLM orchestration, and YNAB API calls. A bundled `llama-server` instance runs the AI model on your hardware — no cloud endpoint, no API key, no network request. See [Architecture](docs/architecture.md) for the full technical breakdown.
+*Also works with Actual Budget — substitute your Actual server for YNAB in step 3.*
 
 ## Install
 
@@ -128,6 +128,10 @@ Change your Actual server password. Budget Itemizer will lose access until you u
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
-## Built with Claude
+## About this project
 
-This project was built with [Claude Code](https://claude.ai). I brought the product vision — local-first, private, zero-config — and made the decisions. Claude wrote the code and guided the technical choices that served those goals.
+Built collaboratively with [Claude Code](https://claude.ai). I brought the product vision — local-first, private, zero-config — and made the decisions. Claude wrote the code and guided the technical choices that served those goals.
+
+## License
+
+[GPL-3.0](LICENSE).
