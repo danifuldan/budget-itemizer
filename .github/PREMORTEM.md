@@ -34,6 +34,11 @@ Weight your search toward these. The author's recurring failure modes:
 1. **Refactor-induced behavioral drift.** A function gets extracted, renamed,
    or generalized, and a caller now sees subtly different timing, ordering, or
    default values. The old behavior was load-bearing in a way nobody documented.
+   **Wholesale-replace sub-case:** a diff that swaps `state.X.map(...)` for
+   `freshSource.map(...)` (or otherwise rebuilds state from a new source).
+   Always ask: *what did the old code preserve that the new code discards?*
+   (user edits, deletions, prior selections, accumulated order). Name the
+   input that exercises the discarded state.
 2. **Missing `await` on async chains.** A function returns a Promise that gets
    discarded. The happy path works because the operation usually finishes
    before anyone reads the result; the failing path is a race.
@@ -80,6 +85,12 @@ name, the input, and the assertion. If a unit test cannot catch it (e.g., it
 needs a real fs.watch or a real Tauri runtime), say so and propose a
 Playwright or manual repro instead — but be specific about steps.
 
+**If the diff touches a reducer or state machine, do not hypothesize this
+test — write it and run it.** Paste the actual pass/fail output into the
+report. A reasoned-about probe is not evidence; an executed one is. (The
+`reducer` is exported from `src/App.tsx` precisely so this is a unit test,
+not a Playwright detour.)
+
 **Confidence:** High / Medium / Low. If Low, say what you'd need to read to
 raise it.
 
@@ -107,5 +118,10 @@ is the only place where "looks fine" is allowed, and only with evidence.
 - [ ] Is the smallest catching test actually the smallest, or did I propose an
       integration test where a 5-line unit test would do?
 - [ ] Did I check each of the 6 historical patterns?
+- [ ] If the diff touches a reducer/state machine, did I actually run the
+      smallest catching test and paste its real output (not hypothesize it)?
+- [ ] For any wholesale-replace, did I name the specific preserved state
+      (user edit/deletion/selection) the new code discards, with the input
+      that exercises it?
 
 If any checkbox is unchecked, revise before sending.
