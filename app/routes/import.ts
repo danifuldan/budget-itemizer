@@ -130,6 +130,8 @@ importRoutes.post(
         shipping: z.number().optional(),
         fees: z.number().optional(),
         discount: z.number().optional(),
+        credit: z.number().optional(),
+        creditLabel: z.string().optional(),
         refund: z.number().optional(),
       }),
       sourceFilename: z.string().optional(),

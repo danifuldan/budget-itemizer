@@ -176,6 +176,38 @@ describe("Hono app integration", () => {
     expect(body.success).toBe(true);
   });
 
+  it("POST /import preserves credit and creditLabel through validation", async () => {
+    // Regression: the /import Zod schema omitted credit/creditLabel, and
+    // Zod strips unknown keys, so a gift-card / store-credit line was
+    // silently dropped before buildSplits ran — the YNAB split would not
+    // reconcile to the receipt total.
+    vi.mocked(importReceiptToYnab).mockResolvedValue(undefined);
+    const res = await app.request("/import", {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        account: "Checking",
+        receipt: {
+          merchant: "Target",
+          transactionDate: "2024-01-01",
+          memo: "",
+          totalAmount: 50.0,
+          category: "Shopping",
+          credit: 15.0,
+          creditLabel: "Gift card",
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(importReceiptToYnab).toHaveBeenCalledWith(
+      "Checking",
+      expect.objectContaining({ credit: 15.0, creditLabel: "Gift card" }),
+    );
+  });
+
   it("POST /import is idempotent: a second concurrent call for the same sourceFilename is rejected with 409", async () => {
     // First call gets the claim; second sees `false` and short-circuits.
     vi.mocked(claimForImport).mockReturnValueOnce(true).mockReturnValueOnce(false);
