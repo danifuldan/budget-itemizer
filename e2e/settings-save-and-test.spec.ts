@@ -19,9 +19,25 @@ import { test, expect } from "@playwright/test";
 import { mockBackend } from "./helpers";
 
 test("settings: save settings POSTs /config with active provider's budget id", async ({ page }) => {
-  // Backend default is wizard-first. Override /setup/status to mark
-  // setup complete so we land directly in the main view, then click
-  // the settings gear from there.
+  // Route precedence is last-registered-wins (see helpers.ts), so
+  // mockBackend MUST be called first or it shadows these overrides.
+  // The wizard-vs-main gate keys on /status `setup` (useStatus →
+  // setupComplete in App.tsx), NOT /setup/status `complete`, so the
+  // /status override below is what actually lands us in the main view.
+  await mockBackend(page);
+
+  await page.route("**/status", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        setup: true,
+        llmReady: true,
+        watcher: { running: true, path: "/tmp/in" },
+      }),
+    });
+  });
+
   await page.route("**/setup/status", (route) => {
     route.fulfill({
       status: 200,
@@ -81,8 +97,6 @@ test("settings: save settings POSTs /config with active provider's budget id", a
     }
   });
 
-  await mockBackend(page);
-
   // /budgets and /accounts for the settings dropdowns.
   await page.route("**/budgets", (route) => {
     route.fulfill({
@@ -122,7 +136,10 @@ test("settings: save settings POSTs /config with active provider's budget id", a
 
   // Edit inbox path so we have a non-secret field to assert in the
   // outgoing /config POST.
-  const inboxInput = page.getByLabel("Inbox Folder");
+  // Exact match: the watcher toggle's aria-label ("Enable background
+  // monitoring for inbox folder") contains "inbox folder", so a loose
+  // getByLabel would match both the input and the switch.
+  const inboxInput = page.getByLabel("Inbox Folder", { exact: true });
   await inboxInput.fill("/tmp/different-inbox");
 
   // Click Save Settings — capture the /config POST.
