@@ -33,7 +33,7 @@ import TitlebarRegion from "./components/TitlebarRegion";
 
 type View = "main" | "review" | "imported" | "setup" | "settings";
 
-interface AppState {
+export interface AppState {
   view: View;
   merchant: string;
   transactionDate: string;
@@ -83,7 +83,7 @@ export type AppAction =
   | { type: "APPLY_PARSE_PROGRESS_EVENT"; event: ParseProgressEvent }
   | { type: "LOAD_BUFFERED_PROGRESS"; filename: string; events: ParseProgressEvent[] };
 
-const initialState: AppState = {
+export const initialState: AppState = {
   view: "main",
   merchant: "",
   transactionDate: "",
@@ -106,7 +106,7 @@ const initialState: AppState = {
   sourceFilename: null,
 };
 
-function reducer(state: AppState, action: AppAction): AppState {
+export function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "START_STREAM":
       return { ...initialState, view: "review", streamStatus: "reading-pdf", lastFile: action.file, sourceFilename: state.sourceFilename };
@@ -154,13 +154,26 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, items: updated };
     }
     case "STREAM_DONE": {
-      // Fill in categories from the final receipt — match by productName since
-      // validation may have dropped items, making index alignment unreliable
+      // The streamed line amounts were provisional — extracted before
+      // total/summary lines were claimed (see build-receipt.ts).
+      // buildReceiptFromLabels produced the reconciled, authoritative
+      // figures. Refresh each SURVIVING streamed item with the reconciled
+      // amount + category (matched by productName). We map over
+      // state.items, not action.receipt.lineItems, so the user's curation
+      // during streaming is preserved: a line deleted mid-parse stays
+      // deleted (not resurrected), and a category the user picked is kept
+      // over the reconciled one. Streamed items with no reconciled match
+      // (reconciliation dropped them) keep their streamed values rather
+      // than vanishing from the review screen.
       const finalItems = action.receipt.lineItems ?? [];
       const doneItems = state.items.map((item) => {
-        if (item.category) return item;
         const match = finalItems.find((fi) => fi.productName === item.productName);
-        return { ...item, category: match?.category || "" };
+        if (!match) return item;
+        return {
+          ...item,
+          lineItemTotalAmount: match.lineItemTotalAmount,
+          category: item.category || match.category || "",
+        };
       });
       return {
         ...state,
