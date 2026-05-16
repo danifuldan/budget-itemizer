@@ -332,7 +332,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
               onChange={(e) => setBudgetProvider(e.target.value as "ynab" | "actual")}
             >
               <option value="ynab">YNAB</option>
-              <option value="actual">Actual Budget</option>
+              {/* Actual Budget temporarily disabled — no test server to verify the setup field-mapping fix */}
             </select>
           </div>
           <div className="wizard-nav">
@@ -410,6 +410,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         </div>
       )}
 
+      {/* Actual Budget temporarily disabled — no test server to verify the setup field-mapping fix. Re-enable: remove this wrapper + uncomment the chooser option in step 2.
       {step === 3 && budgetProvider === "actual" && (
         <div className="wizard-card animate-in">
           <div className="wizard-icon" aria-hidden="true">
@@ -479,6 +480,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           </div>
         </div>
       )}
+      */}
 
       {step === 4 && (
         <div className="wizard-card animate-in">
@@ -578,7 +580,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
             </div>
             <div className="check-item">
               <div className="check-icon">&#10003;</div>
-              {budgetProvider === "ynab" ? "Connected to YNAB" : "Connected to Actual Budget"}
+              Connected to YNAB
             </div>
             <div className="check-item">
               <div className="check-icon">&#10003;</div>

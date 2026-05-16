@@ -18,8 +18,6 @@ Drop a PDF into the inbox folder or drag it into the app window, and watch it go
 2. **Review the split** — The AI parses line items and maps them to your YNAB categories. Edit anything it got wrong.
 3. **Import to YNAB** — One click and the split transaction lands in your budget.
 
-*Also works with Actual Budget — substitute your Actual server for YNAB in step 3.*
-
 ## Install
 
 Requires macOS on Apple Silicon (M1 or later).
@@ -51,7 +49,7 @@ Then open the app normally.
 
 #### Where does my data go?
 
-Your data goes to *your* YNAB account (or *your* Actual Budget server), from *your* computer. That's it. Budget Itemizer is not a cloud service — there's no server we run, no account you create with us, no telemetry, and no analytics. The receipt parsing happens locally on your machine via a bundled language model. The only network requests are the YNAB or Actual Budget API calls you'd make anyway, plus the one-time model download from Hugging Face during setup. The code is open — you can read it and verify.
+Your data goes to *your* YNAB account, from *your* computer. That's it. Budget Itemizer is not a cloud service — there's no server we run, no account you create with us, no telemetry, and no analytics. The receipt parsing happens locally on your machine via a bundled language model. The only network requests are the YNAB API calls you'd make anyway, plus the one-time model download from Hugging Face during setup. The code is open — you can read it and verify.
 
 #### Does my data go to OpenAI, Anthropic, or any other AI company?
 
@@ -77,14 +75,13 @@ Budget Itemizer relies on Apple Silicon's unified memory and GPU acceleration to
 
 #### Does it work offline?
 
-Yes — once setup is complete and the model is downloaded, receipt parsing works without an internet connection. The only thing that requires internet is syncing your splits to YNAB or Actual Budget, since those are remote services.
+Yes — once setup is complete and the model is downloaded, receipt parsing works without an internet connection. The only thing that requires internet is syncing your splits to YNAB, since that's a remote service.
 
 ### Known issues
 
 #### What's broken or wonky right now?
 
 - Receipt format coverage is narrow (Amazon / Walmart / Costco order invoices). Other retailers may misparse.
-- Apple Foundation Models (iOS 18+ on-device LLM) is implemented but disabled because Apple's content filtering blocks legitimate receipt content (book titles, etc.). Stick with the bundled Llama provider.
 
 #### How do I report a bug or request a feature?
 
@@ -107,22 +104,6 @@ It uses the token to read your budget categories and accounts (so it can predict
 #### Can I revoke the token later?
 
 Yes. Go to **Account Settings → Developer Settings** in YNAB and delete the token. Budget Itemizer will stop working until you generate a new one.
-
-#### Why does Budget Itemizer need my Actual Budget password?
-
-Actual's API authenticates with your server password — unlike YNAB, Actual doesn't issue separate API tokens. The same password you use to log in to your Actual server is what Budget Itemizer needs to read your budget and create transactions. **This is more sensitive than a YNAB token**, since it's full access to your Actual server, not a scoped credential.
-
-#### Where does my Actual password go?
-
-Only to the Actual server URL you configure — typically your own self-hosted instance. Budget Itemizer doesn't send it anywhere else and stores it in the **macOS Keychain** (the same place Safari stores your saved passwords).
-
-#### What does Budget Itemizer do with my Actual credentials?
-
-It connects to your Actual server, reads your budget categories and accounts, and creates split transactions. It doesn't change settings, modify other transactions, or alter anything outside the imports it makes.
-
-#### Can I revoke access for Actual Budget?
-
-Change your Actual server password. Budget Itemizer will lose access until you update it in settings. There's no token to revoke separately, so a password change is the only revocation mechanism.
 
 ## Contributing
 
