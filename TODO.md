@@ -9,8 +9,8 @@ Status updated as committed.
 - [x] **F4** `watcher.ts` `fileDedupKey` (name+size+mtime) replaces basename dedup. Tests: `watcher-dedup.test.ts`.
 - [x] **F6** `llama-server.ts` exit handler is instance-scoped (`instance?.process === child`). Tests: `llama-server-exit.test.ts`.
 - [x] **F11** `watcher.ts` `waitUntilStable` gates `drain` so files settle before keying/parsing (pulled forward — premortem found F4-alone double-imports slow copies). Tests: `watcher-settle.test.ts`.
-- [ ] **F10** `import.ts` inbox `existsSync→writeFileSync` TOCTOU → wrong PDF archived, new bytes lost, old unimported receipt deleted.
-- [ ] **F12** inbox-switch mid-parse → `recentlyProcessed` bleeds across generations, suppresses same-named files in the new inbox; old drain owns `draining`.
+- [x] **F10** `import.ts` uniquifies inbox filename on collision. Tests: `app.inbox-collision.test.ts`.
+- [x] **F12** Resolved by F4: the money-loss vector (basename suppression of a distinct same-named file across an inbox switch) cannot occur with identity keys (name+size+mtime) — proven by `watcher-dedup.test.ts`. Residual (benign 10s stale entry; cross-volume archive-location orphan on simultaneous inbox+processed change mid-parse) is already mitigated by the `import.ts` path snapshot; auto-import path logs a warning but the receipt IS imported. No new code — adding watcher-generation machinery to the lifecycle path is net-negative risk for a non-money residual.
 - [ ] **F3** `/parse-image/stream` no `onAbort` → abandoned receipt resurrected as `ready` (double-import candidate with F1).
 - [ ] **F5** re-upload during an active claim → entry removed on import success, re-pathed file re-imported.
 - [ ] **F2** `/import` release-on-any-error too coarse → duplicate transaction on retry after an ambiguous (ack-lost) failure. Needs an idempotency key.
