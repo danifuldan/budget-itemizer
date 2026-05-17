@@ -52,15 +52,32 @@ importRoutes.post(
     if (!safeFilename) {
       return c.json({ error: "Filename could not be sanitized to a safe name." }, 400);
     }
+    let pendingName = safeFilename;
     if (inboxPath) {
       try {
-        const destPath = path.join(inboxPath, safeFilename);
-        const buffer = Buffer.from(await file.arrayBuffer());
         fs.mkdirSync(inboxPath, { recursive: true });
-        if (!fs.existsSync(destPath)) {
-          fs.writeFileSync(destPath, buffer);
+        const buffer = Buffer.from(await file.arrayBuffer());
+        let destPath = path.join(inboxPath, pendingName);
+        if (fs.existsSync(destPath)) {
+          // A DIFFERENT unimported receipt already holds this name
+          // (Amazon order invoices are always "Order.pdf"). Uniquify so
+          // we persist THESE bytes and never adopt or destroy the
+          // existing file / its pending entry.
+          const ext = path.extname(safeFilename);
+          const base = path.basename(safeFilename, ext);
+          let n = 1;
+          do {
+            pendingName = `${base}-${n}${ext}`;
+            destPath = path.join(inboxPath, pendingName);
+            n++;
+          } while (fs.existsSync(destPath) && n < 1000);
+          if (fs.existsSync(destPath)) {
+            pendingName = `${base}-${Date.now()}${ext}`;
+            destPath = path.join(inboxPath, pendingName);
+          }
         }
-        addPending(safeFilename, destPath);
+        fs.writeFileSync(destPath, buffer);
+        addPending(pendingName, destPath);
       } catch (e: any) {
         console.warn(`Could not save to inbox: ${e.message}`);
       }
@@ -84,7 +101,7 @@ importRoutes.post(
           onItem: (item) => writeEvent("item", item),
           onCategories: (categories) => writeEvent("categories", { categories }),
           onDone: (receipt) => {
-            markPendingReady(safeFilename, receipt);
+            markPendingReady(pendingName, receipt);
             writeEvent("done", { receipt });
           },
           onError: (error, step) => writeEvent("error", { message: error.message, step }),
