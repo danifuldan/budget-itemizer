@@ -141,13 +141,9 @@ async function pollHealth(port: number, timeoutMs = 180_000): Promise<void> {
 // ── Public API ─────────────────────────────────────────────────────
 
 export async function startLlamaServer(modelPath: string): Promise<string> {
-  if (instance) {
-    // If same model is already running, return its endpoint
-    if (instance.modelPath === modelPath) {
-      return `http://127.0.0.1:${instance.port}/v1`;
-    }
-    // Different model requested — stop the old one first
-    await stopLlamaServer();
+  // Fast path: the requested model is already running — no start needed.
+  if (instance && instance.modelPath === modelPath) {
+    return `http://127.0.0.1:${instance.port}/v1`;
   }
 
   if (starting) {
@@ -156,6 +152,15 @@ export async function startLlamaServer(modelPath: string): Promise<string> {
   starting = true;
 
   try {
+    // A different model is running — stop it first. This is part of the
+    // start: `starting` stays true across the stop so callers that gate
+    // on isLlamaServerStarting() (e.g. the watcher's warmup wait) don't
+    // see a false "no start underway" gap during the ~stop window and
+    // abort a freshly-dropped file mid-restart.
+    if (instance) {
+      await stopLlamaServer();
+    }
+
     // Optimistically clear the prior failure — if we throw on this
     // attempt, the catch below will refresh it.
     lastStartError = null;
@@ -224,6 +229,15 @@ export async function startLlamaServer(modelPath: string): Promise<string> {
  *  attempt succeeded (or there was no attempt). */
 export function getLlamaServerStartError(): string | null {
   return lastStartError;
+}
+
+/** True while a start attempt is underway (including the stop of a
+ *  previously-running model). Callers waiting on warmup use this to tell
+ *  "permanently failed, give up" from "a restart is in progress, keep
+ *  waiting" — lastStartError alone can't, since it lingers across the
+ *  gap between a failed attempt and the next one. */
+export function isLlamaServerStarting(): boolean {
+  return starting;
 }
 
 export function stopLlamaServer(): Promise<void> {

@@ -24,6 +24,8 @@ vi.mock("./receipt", async () => {
 // oversize-rejection path (which fires before the wait) is unaffected.
 vi.mock("./llama-server", () => ({
   isLlamaServerRunning: vi.fn(() => true),
+  getLlamaServerStartError: vi.fn(() => null),
+  isLlamaServerStarting: vi.fn(() => false),
 }));
 
 import {

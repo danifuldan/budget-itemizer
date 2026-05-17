@@ -59,6 +59,8 @@ vi.mock("./history", () => ({
 // let the (mocked) parser drive the rest.
 vi.mock("./llama-server", () => ({
   isLlamaServerRunning: vi.fn(() => true),
+  getLlamaServerStartError: vi.fn(() => null),
+  isLlamaServerStarting: vi.fn(() => false),
 }));
 
 import { moveToProcessed, startWatcher, stopWatcher, getWatcherStatus, queueFile } from "./watcher";

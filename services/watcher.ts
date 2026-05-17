@@ -3,7 +3,7 @@ import * as path from "path";
 import { EventEmitter } from "events";
 import type { Receipt } from "./shared-types";
 import { importReceipt, parseImageReceiptStream } from "./receipt";
-import { isLlamaServerRunning } from "./llama-server";
+import { isLlamaServerRunning, getLlamaServerStartError, isLlamaServerStarting } from "./llama-server";
 import { BudgetConnectionError } from "./budget-provider";
 import { addRecord } from "./history";
 import { getConfig } from "./config";
@@ -390,8 +390,40 @@ export const queueFile = async (filePath: string, autoImport = false) => {
   // first callLLM. Poll until the server's up; the entry sits in the
   // pending list as "parsing" the whole time, and the FE shows a
   // "Loading AI model" hint when status.llmReady is false.
+  //
+  // Bounded, deliberately: a recorded start error (OOM, missing/corrupt
+  // model) means the server will NEVER come up, and an absolute cap well
+  // past the ~180s health-check window guards the pathological "start
+  // hung without throwing" case. Either way surface an error entry
+  // instead of polling every 1s forever (was: unbounded `while
+  // (!running)` — a permanent start failure wedged the queue, kept the
+  // entry stuck in "parsing", and pinned the event loop indefinitely).
+  const WARMUP_POLL_MS = 1_000;
+  const WARMUP_MAX_MS = 300_000;
+  const waitStarted = Date.now();
   while (!isLlamaServerRunning()) {
-    await new Promise((r) => setTimeout(r, 1_000));
+    // While a start is genuinely underway, never terminate — wait it out.
+    // It's internally bounded (pollHealth has a 180s timeout, after which
+    // it throws → lastStartError set, `starting` cleared → the next poll
+    // sees the not-starting terminal case). This is what keeps a file
+    // dropped mid-restart (lastStartError lingers across the failed-
+    // attempt gap and the model-switch stop phase) AND a slow/suspended
+    // warmup (wall clock can jump past the cap) from being wrongly
+    // errored while the server is actually coming up.
+    if (!isLlamaServerStarting()) {
+      const startErr = getLlamaServerStartError();
+      const timedOut = Date.now() - waitStarted > WARMUP_MAX_MS;
+      if (startErr || timedOut) {
+        entry.status = "error";
+        entry.parseError = startErr
+          ? `AI model failed to start: ${startErr}. Open Settings → AI Model, then re-drop the file.`
+          : "AI model didn't become ready in time. Open Settings → AI Model, then re-drop the file.";
+        console.error(`  ${filename}: ${entry.parseError}`);
+        watcherEvents.emit("file-parsed", { filename, error: entry.parseError });
+        return;
+      }
+    }
+    await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
   }
 
   try {
