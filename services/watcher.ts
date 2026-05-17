@@ -34,6 +34,10 @@ export interface PendingFile {
   /** Status at the moment `claimForImport` was called — used by
    *  `releaseImportClaim` to restore state when an import fails. */
   preImportStatus?: "ready" | "error";
+  /** When `claimForImport` set status to "importing". A claim with no
+   *  terminal within STALE_CLAIM_MS is reaped (the /import that owned it
+   *  died without releasing). */
+  claimedAt?: number;
 }
 
 // --- Event bus ---
@@ -42,7 +46,37 @@ export const watcherEvents = new EventEmitter();
 // --- Pending queue ---
 const pendingFiles = new Map<string, PendingFile>();
 
-export const getPendingFiles = (): PendingFile[] => Array.from(pendingFiles.values());
+/** A claim with no terminal (success → removePending / failure →
+ *  releaseImportClaim) within this bound means the /import that owned it
+ *  died (network drop, app backgrounded, or autoImportParsed bailed to a
+ *  manual import that then died). Far longer than any real import
+ *  (YNAB 30s timeout + retries). Reaped on the next pending poll so the
+ *  receipt becomes actionable again instead of stuck forever (F1b).
+ *  Safe to retry after reap: F2's import_id dedupes a re-create. */
+const STALE_CLAIM_MS = 120_000;
+
+const reapStaleClaims = (): void => {
+  const now = Date.now();
+  for (const entry of pendingFiles.values()) {
+    if (
+      entry.status === "importing" &&
+      entry.claimedAt !== undefined &&
+      now - entry.claimedAt > STALE_CLAIM_MS
+    ) {
+      console.warn(
+        `  Reaping stale import claim for ${entry.filename} (no terminal in ${STALE_CLAIM_MS}ms)`,
+      );
+      entry.status = entry.preImportStatus ?? "ready";
+      delete entry.preImportStatus;
+      delete entry.claimedAt;
+    }
+  }
+};
+
+export const getPendingFiles = (): PendingFile[] => {
+  reapStaleClaims();
+  return Array.from(pendingFiles.values());
+};
 
 export const removePending = (filename: string): boolean => pendingFiles.delete(filename);
 
@@ -95,6 +129,14 @@ export const revalidatePendingCategories = (validCategories: string[]): { affect
 export const addPending = (filename: string, filePath: string): void => {
   const existing = pendingFiles.get(filename);
   if (existing) {
+    // A claimed import is in flight for this filename. /import has
+    // already snapshotted claimedFilePath; mutating filePath here would,
+    // on import success + removePending, orphan the re-uploaded bytes
+    // with no entry and no claim → the watcher re-imports them
+    // (duplicate transaction, F5). Leave the in-flight entry untouched —
+    // the re-upload is handled as its own arrival via the watcher's
+    // identity-keyed dedup once the claim resolves.
+    if (existing.status === "importing") return;
     // Re-upload: refresh path + detectedAt (acts as a version token for DELETE).
     existing.filePath = filePath;
     existing.detectedAt = new Date().toISOString();
@@ -127,6 +169,7 @@ export const claimForImport = (filename: string): boolean => {
   if (entry.status !== "ready" && entry.status !== "error") return false;
   entry.preImportStatus = entry.status;
   entry.status = "importing";
+  entry.claimedAt = Date.now();
   return true;
 };
 
@@ -136,6 +179,7 @@ export const releaseImportClaim = (filename: string): void => {
   if (!entry || entry.status !== "importing") return;
   entry.status = entry.preImportStatus ?? "ready";
   delete entry.preImportStatus;
+  delete entry.claimedAt;
 };
 
 export const markPendingReady = (filename: string, receipt: Receipt): void => {

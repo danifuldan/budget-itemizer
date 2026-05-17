@@ -84,10 +84,27 @@ importRoutes.post(
     }
 
     return streamSSE(c, async (stream) => {
+      // If the client navigates away / discards mid-parse, the request
+      // aborts. Without this guard the server keeps parsing and onDone
+      // calls markPendingReady — resurrecting a receipt the user
+      // explicitly abandoned as a clickable "ready" row (F3). Mirror the
+      // watcher route's onAbort handling.
+      let aborted = false;
+      stream.onAbort(() => {
+        aborted = true;
+        // Don't leave the entry stuck "parsing" forever: the parse keeps
+        // running (no cancellation plumbed) and onDone is now skipped, so
+        // nothing would ever transition it (the stale-claim reaper only
+        // covers "importing"). Drop it — the user abandoned it. Idempotent
+        // if an explicit Discard already DELETEd it.
+        removePending(pendingName);
+      });
+
       // Queue writes so sync callbacks from IncrementalLabelParser
       // don't race on the async SSE stream
       let writeChain = Promise.resolve();
       const writeEvent = (event: string, data: unknown) => {
+        if (aborted) return;
         writeChain = writeChain.then(() =>
           stream.writeSSE({ event, data: JSON.stringify(data) })
         );
@@ -101,6 +118,8 @@ importRoutes.post(
           onItem: (item) => writeEvent("item", item),
           onCategories: (categories) => writeEvent("categories", { categories }),
           onDone: (receipt) => {
+            // User abandoned this parse — do not resurrect it.
+            if (aborted) return;
             markPendingReady(pendingName, receipt);
             writeEvent("done", { receipt });
           },

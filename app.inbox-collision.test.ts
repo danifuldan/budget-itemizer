@@ -53,6 +53,7 @@ vi.mock("./services/llama-server", () => ({
 }));
 const addPending = vi.fn();
 const markPendingReady = vi.fn();
+const removePending = vi.fn();
 vi.mock("./services/watcher", () => {
   const { EventEmitter } = require("events");
   return {
@@ -62,7 +63,7 @@ vi.mock("./services/watcher", () => {
     watcherEvents: new EventEmitter(),
     getPendingFiles: vi.fn(() => []),
     getPending: vi.fn(),
-    removePending: vi.fn(),
+    removePending: (...a: any[]) => removePending(...a),
     addPending: (...a: any[]) => addPending(...a),
     markPendingReady: (...a: any[]) => markPendingReady(...a),
     moveToProcessed: vi.fn(),
@@ -89,6 +90,7 @@ beforeEach(() => {
   tmpInbox = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-collision-"));
   addPending.mockReset();
   markPendingReady.mockReset();
+  removePending.mockReset();
   parseImageReceiptStream.mockReset().mockImplementation(async (_f: any, opts: any) => {
     await opts.onDone?.({ merchant: "Amazon", totalAmount: 1, transactionDate: "2026-05-10", lineItems: [] });
   });
@@ -133,5 +135,38 @@ describe("POST /parse-image/stream — inbox name collision (F10)", () => {
     expect(addPending.mock.calls[0][0]).toBe(newFile!.n);
     expect(addPending.mock.calls[0][0]).not.toBe("Order.pdf");
     expect(markPendingReady).toHaveBeenCalledWith(newFile!.n, expect.anything());
+  });
+
+  it("F3: an aborted parse does not resurrect the receipt via markPendingReady", async () => {
+    let releaseParse!: () => void;
+    parseImageReceiptStream.mockReset().mockImplementation(async (_f: any, opts: any) => {
+      // Hold the parse open until the test releases it (post-abort).
+      await new Promise<void>((r) => (releaseParse = r));
+      await opts.onDone?.({ merchant: "Amazon", totalAmount: 1, transactionDate: "2026-05-10", lineItems: [] });
+    });
+
+    const form = new FormData();
+    form.append(
+      "file",
+      new File([new Uint8Array(Buffer.from("ABANDONED"))], "Order.pdf", { type: "application/pdf" }),
+    );
+    const res = await app.request("/parse-image/stream", {
+      method: "POST",
+      headers: { Authorization: auth },
+      body: form,
+    });
+    // Simulate the client going away: cancel the SSE response stream.
+    // Hono fires stream.onAbort on cancel.
+    const reader = res.body!.getReader();
+    await new Promise((r) => setTimeout(r, 30)); // handler registers onAbort + enters parse
+    await reader.cancel(); // user navigates away / discards
+    await new Promise((r) => setTimeout(r, 30));
+    releaseParse(); // parse "completes" after the abort
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(markPendingReady).not.toHaveBeenCalled();
+    // ...and the pending entry must be cleaned up, not left stuck
+    // "parsing" forever (F1b's reaper only covers "importing").
+    expect(removePending).toHaveBeenCalledWith("Order.pdf");
   });
 });

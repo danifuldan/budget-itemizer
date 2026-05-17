@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createHash } from "crypto";
 import * as ynab from "ynab";
 import env from "../utils/env-vars";
 import { getConfig } from "./config";
@@ -602,6 +603,18 @@ export class YnabBudgetProvider implements BudgetProvider {
     splits?: { category: string; amount: number; memo?: string }[],
   ): Promise<void> {
     const fixedTotalAmount = Math.round(-totalAmount * 1000);
+    // Deterministic YNAB import_id (≤36 chars). On an ack-lost retry of
+    // the SAME receipt, /import re-creates with the same import_id and
+    // YNAB's native bank-import dedupe rejects the duplicate (F2). Two
+    // genuinely-distinct receipts with identical merchant+date+amount
+    // would collide — same trade-off banks/YNAB make on real imports;
+    // far rarer and far less harmful than a duplicate transaction.
+    const importId =
+      "BI:" +
+      createHash("sha256")
+        .update(`${merchant}|${transactionDate}|${fixedTotalAmount}`)
+        .digest("hex")
+        .slice(0, 33);
     const fixedSplits = splits?.map((split) => ({
       category: split.category,
       amount: Math.round(-split.amount * 1000),
@@ -640,6 +653,7 @@ export class YnabBudgetProvider implements BudgetProvider {
         category_id: categoryId,
         date: transactionDate,
         payee_name: merchant,
+        import_id: importId,
         approved: false,
         memo: subtransactions.length > 1 ? undefined : memo,
         subtransactions: subtransactions.length > 1 ? subtransactions : undefined,
