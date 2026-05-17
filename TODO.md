@@ -15,7 +15,8 @@ Status updated as committed.
 - [ ] **F5** re-upload during an active claim → entry removed on import success, re-pathed file re-imported.
 - [ ] **F2** `/import` release-on-any-error too coarse → duplicate transaction on retry after an ambiguous (ack-lost) failure. Needs an idempotency key.
 - [ ] **F1b** (premortem Group A, Bug 2) `autoImportParsed` claim-fail branch bails with no cleanup; a manual `/import` that dies post-claim orphans the entry in `importing`. Fold into the claim/abort group (F3/F5/F2) — needs a stale-`importing` recovery path.
-- [ ] **F7/F8/F9** budget-client cache + in-flight config reads survive `resetBudgetProvider` → import mid-config-change writes to the wrong budget / uses stale categories. Shared root.
+- [x] **F7/F9** `YnabBudgetProvider.shutdown()` now clears ALL memoized state (`_api/_budgets/_transactions/_lastApiKey/_categoriesInFlight`, not just `_categoriesCache`), so a budget/cred/provider switch fully rebuilds. Tests: `budget-ynab-reset.test.ts`. Closes the dominant wrong-budget-write + stale-categories vector.
+- [ ] **F8b** Residual: an api-key change committed *between two awaits within a single in-flight* `findMatchingTransaction` can still split the match/write across creds. Needs a per-import credential+budgetId snapshot (distinct careful change; now bounded by the F7/F9 next-access rebuild). Fold with the claim/abort group.
 
 ## Quality workflow
 

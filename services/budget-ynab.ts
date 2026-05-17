@@ -652,9 +652,18 @@ export class YnabBudgetProvider implements BudgetProvider {
   }
 
   async shutdown(): Promise<void> {
-    // Reset memoized state so the next provider instance starts fresh
-    // — used when config switches budgets or providers.
+    // Reset ALL memoized state so the next access fully rebuilds from
+    // current config. Used by resetBudgetProvider() when config switches
+    // budget / api key / provider. Clearing only _categoriesCache (the
+    // old behavior) left the api-key-scoped client and any in-flight
+    // categories promise bound to the OLD config — a wrong-budget write
+    // and a stale category list after the user changed budgets (F7/F9).
     _categoriesCache = null;
+    _categoriesInFlight = null;
+    _api = null;
+    _budgets = null;
+    _transactions = null;
+    _lastApiKey = "";
   }
 }
 
