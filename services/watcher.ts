@@ -221,22 +221,77 @@ let draining = false;
 const recentlyProcessed = new Map<string, ReturnType<typeof setTimeout>>();
 const DEDUP_TTL_MS = 10_000;
 
-const markProcessed = (filename: string) => {
+/**
+ * Identity key for dedup. Keyed on name + size + mtime, NOT bare basename:
+ * Amazon order invoices are always "Order.pdf", so a basename-only key
+ * silently suppressed a genuinely different second Order.pdf dropped
+ * within DEDUP_TTL_MS (F4 — a receipt's money never entered the budget).
+ * A same-event refire of the SAME file has identical size+mtime → same
+ * key (still deduped); a different file differs in size and/or mtime →
+ * different key (processed). Returns null if the file vanished.
+ */
+export const fileDedupKey = (filePath: string): string | null => {
+  try {
+    const s = fs.statSync(filePath);
+    return `${path.basename(filePath)}:${s.size}:${s.mtimeMs}`;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Resolve once the file's size has stopped changing (two consecutive
+ * stats equal across `intervalMs`), i.e. the copy/write has settled.
+ * Returns false if the file vanished (renamed away mid-copy). A slow
+ * multi-MB receipt on a network/iCloud inbox used to be parsed while
+ * still being written → truncated parse + wrong total, AND — since the
+ * F4 identity key is size/mtime-based — the settled file got a new key
+ * and was processed a SECOND time (duplicate import). Gating drain on
+ * this means the dedup key is computed on the SETTLED identity, so a
+ * post-settle fs.watch refire dedupes correctly.
+ */
+export const waitUntilStable = async (
+  filePath: string,
+  opts: { intervalMs?: number; maxMs?: number } = {},
+): Promise<boolean> => {
+  const intervalMs = opts.intervalMs ?? 600;
+  const maxMs = opts.maxMs ?? 15_000;
+  const started = Date.now();
+  let prev = -1;
+  for (;;) {
+    let size: number;
+    try {
+      size = fs.statSync(filePath).size;
+    } catch {
+      return false; // vanished / renamed away mid-copy
+    }
+    if (size === prev) return true; // unchanged across one interval → settled
+    // Best-effort cap: a file that never settles within maxMs is
+    // pathological; attempt the parse (its own error path handles a bad
+    // PDF) rather than silently drop the receipt forever.
+    if (Date.now() - started > maxMs) return true;
+    prev = size;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+};
+
+const markProcessed = (key: string) => {
   // If the watcher has been stopped, skip both the cleanup and the new
   // timer registration. An in-flight `drain()` await can resolve AFTER
   // stopWatcher cleared `pendingTimers`, race back into this function,
   // and add a fresh 10-second timer to the just-cleared Set — keeping
   // the event loop alive past stop. Bail when there's nothing to track.
   if (watcher === null) return;
-  if (recentlyProcessed.has(filename)) clearTimeout(recentlyProcessed.get(filename)!);
-  recentlyProcessed.set(filename, trackedSetTimeout(() => recentlyProcessed.delete(filename), DEDUP_TTL_MS));
+  if (recentlyProcessed.has(key)) clearTimeout(recentlyProcessed.get(key)!);
+  recentlyProcessed.set(key, trackedSetTimeout(() => recentlyProcessed.delete(key), DEDUP_TTL_MS));
 };
 
 const enqueue = (filePath: string) => {
-  const filename = path.basename(filePath);
-  // Deduplicate: skip if already queued or recently processed
+  // Deduplicate: skip if this exact path is already queued, or this
+  // file's identity (see fileDedupKey) was recently processed.
   if (fileQueue.includes(filePath)) return;
-  if (recentlyProcessed.has(filename)) return;
+  const key = fileDedupKey(filePath);
+  if (key && recentlyProcessed.has(key)) return;
   fileQueue.push(filePath);
   drain();
 };
@@ -248,11 +303,18 @@ const drain = async () => {
     while (fileQueue.length > 0) {
       const filePath = fileQueue.shift()!;
       if (!fs.existsSync(filePath)) continue;
-      const filename = path.basename(filePath);
-      if (recentlyProcessed.has(filename)) continue;
+      // Wait for the copy/write to settle BEFORE keying or parsing.
+      // Keeps the parse off a truncated file and makes the identity key
+      // the settled one (so a later refire of the same file dedupes).
+      if (!(await waitUntilStable(filePath))) continue;
+      // Compute the identity key NOW (settled), while the file is still
+      // in the inbox — by the time processFile resolves, auto-import may
+      // have moved it to processed and stat would fail.
+      const key = fileDedupKey(filePath);
+      if (key && recentlyProcessed.has(key)) continue;
       try {
         await processFile(filePath);
-        markProcessed(filename);
+        if (key) markProcessed(key);
       } catch (err) {
         console.error(`Error processing ${filePath}:`, err);
       }
@@ -267,7 +329,7 @@ const ensureDirs = (inbox: string, processed: string) => {
   fs.mkdirSync(processed, { recursive: true });
 };
 
-const autoImportParsed = async (entry: PendingFile) => {
+export const autoImportParsed = async (entry: PendingFile) => {
   const config = getConfig();
   const account = config.defaultAccount;
   if (!account) {
@@ -277,6 +339,19 @@ const autoImportParsed = async (entry: PendingFile) => {
 
   const receipt = entry.receipt!;
   const filename = entry.filename;
+
+  // Atomically claim before submitting. By the time we get here the
+  // `file-parsed` event has already flipped the FE row to a clickable
+  // "ready", so a manual Quick-Import can race us. claimForImport is the
+  // same gate /import uses; if it fails another path already owns this
+  // receipt — bail rather than double-submit to the budget provider.
+  // (Both terminal paths below removePending, consuming the claim;
+  // auto-import failure removes the entry, so no releaseImportClaim —
+  // consistent with this function's existing remove-on-failure behavior.)
+  if (!claimForImport(filename)) {
+    console.log(`  Auto-import skipped for ${filename}: already claimed by another import`);
+    return;
+  }
 
   try {
     await importReceipt(account, receipt);

@@ -1,5 +1,22 @@
 # TODO
 
+## Concurrency audit backlog (2026-05-17, hostile race sweep)
+
+Each fixed via TDD + executed pre-mortem probe, grouped by shared file.
+Status updated as committed.
+
+- [x] **F1** `watcher.ts` `autoImportParsed` claim bracket added (commit pending). Tests: `watcher-autoimport.test.ts`.
+- [x] **F4** `watcher.ts` `fileDedupKey` (name+size+mtime) replaces basename dedup. Tests: `watcher-dedup.test.ts`.
+- [x] **F6** `llama-server.ts` exit handler is instance-scoped (`instance?.process === child`). Tests: `llama-server-exit.test.ts`.
+- [x] **F11** `watcher.ts` `waitUntilStable` gates `drain` so files settle before keying/parsing (pulled forward — premortem found F4-alone double-imports slow copies). Tests: `watcher-settle.test.ts`.
+- [ ] **F10** `import.ts` inbox `existsSync→writeFileSync` TOCTOU → wrong PDF archived, new bytes lost, old unimported receipt deleted.
+- [ ] **F12** inbox-switch mid-parse → `recentlyProcessed` bleeds across generations, suppresses same-named files in the new inbox; old drain owns `draining`.
+- [ ] **F3** `/parse-image/stream` no `onAbort` → abandoned receipt resurrected as `ready` (double-import candidate with F1).
+- [ ] **F5** re-upload during an active claim → entry removed on import success, re-pathed file re-imported.
+- [ ] **F2** `/import` release-on-any-error too coarse → duplicate transaction on retry after an ambiguous (ack-lost) failure. Needs an idempotency key.
+- [ ] **F1b** (premortem Group A, Bug 2) `autoImportParsed` claim-fail branch bails with no cleanup; a manual `/import` that dies post-claim orphans the entry in `importing`. Fold into the claim/abort group (F3/F5/F2) — needs a stale-`importing` recovery path.
+- [ ] **F7/F8/F9** budget-client cache + in-flight config reads survive `resetBudgetProvider` → import mid-config-change writes to the wrong budget / uses stale categories. Shared root.
+
 ## Quality workflow
 
 Standing practices for any change that touches behavior. Apply in order; stop

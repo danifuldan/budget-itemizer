@@ -207,7 +207,13 @@ export async function startLlamaServer(modelPath: string): Promise<string> {
 
     child.on("exit", (code) => {
       console.log(`[llama-server] exited with code ${code}`);
-      instance = null;
+      // Only clear the singleton if THIS process is still the live
+      // instance. A SIGKILL'd previous process can fire 'exit' LATE,
+      // after a new start already set `instance` to the new process;
+      // an unconditional null would make isLlamaServerRunning() lie
+      // (false while a healthy server is up) and the watcher would then
+      // wrongly error every dropped receipt.
+      if (instance?.process === child) instance = null;
     });
 
     await pollHealth(port);
