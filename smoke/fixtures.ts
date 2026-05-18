@@ -114,7 +114,7 @@ export const fixtures: Array<{ filename: string; receipt: ReceiptShape }> = [
     receipt: {
       merchant: "Walmart",
       storeAddress: "789 Imaginary Lane, Springfield, IL",
-      orderDate: "November 7, 2026",
+      orderDate: "January 15, 2026",
       orderNumber: "SYN-1001",
       items: [
         { qty: 2, description: "Whole milk gallon", amount: 7.98 },
@@ -134,7 +134,7 @@ export const fixtures: Array<{ filename: string; receipt: ReceiptShape }> = [
     receipt: {
       merchant: "Costco Wholesale",
       storeAddress: "Warehouse #404 — 12 Fictional Way, Lakebrook, OR",
-      orderDate: "October 22, 2026",
+      orderDate: "January 15, 2026",
       orderNumber: "MEMBER 999000-0",
       items: [
         { qty: 1, description: "1138422 KS PAPER TOWELS 12RL", amount: 21.99 },
@@ -154,7 +154,7 @@ export const fixtures: Array<{ filename: string; receipt: ReceiptShape }> = [
     receipt: {
       merchant: "Amazon.com",
       storeAddress: "Order shipped to: 42 Pretend Street, Apt 3, Capital City",
-      orderDate: "October 5, 2026",
+      orderDate: "January 15, 2026",
       orderNumber: "112-7000000-0000000",
       items: [
         { qty: 1, description: "Cotton bed sheet set, queen, slate blue", amount: 38.45 },
@@ -173,7 +173,7 @@ export const fixtures: Array<{ filename: string; receipt: ReceiptShape }> = [
     receipt: {
       merchant: "Imaginary Coffee Roasters",
       storeAddress: "13 Made-Up Boulevard, Bayshore",
-      orderDate: "September 18, 2026",
+      orderDate: "January 15, 2026",
       orderNumber: "RCPT-22",
       items: [],
       total: 6.75,
