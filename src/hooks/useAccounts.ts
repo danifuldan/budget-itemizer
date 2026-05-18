@@ -1,5 +1,6 @@
 import { useRetryableFetch } from "./useRetryableFetch";
+import type { AccountRef } from "../api/types";
 
-export function useAccounts(enabled: boolean = true): string[] {
-  return useRetryableFetch<string[]>("/accounts", [], { enabled }).data;
+export function useAccounts(enabled: boolean = true): AccountRef[] {
+  return useRetryableFetch<AccountRef[]>("/accounts", [], { enabled }).data;
 }

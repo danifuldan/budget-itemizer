@@ -1,7 +1,10 @@
+import type { AccountRef } from "../api/types";
+
 interface ReviewFooterProps {
-  accounts: string[];
+  accounts: AccountRef[];
+  /** The selected account *id* (identity), not its display name. */
   selectedAccount: string;
-  onAccountChange: (account: string) => void;
+  onAccountChange: (accountId: string) => void;
   onDiscard?: () => void;
   onImport: () => void;
   importDisabled: boolean;
@@ -29,8 +32,8 @@ export default function ReviewFooter({
         >
           {accounts.length === 0 && <option value="">Loading accounts...</option>}
           {accounts.map((a) => (
-            <option key={a} value={a}>
-              {a}
+            <option key={a.id} value={a.id}>
+              {a.name}
             </option>
           ))}
         </select>

@@ -1,6 +1,6 @@
 import { useReducer, useEffect, useCallback, useState, useRef } from "react";
 import { apiPost, initFailure, uploadToInbox } from "./api/client";
-import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportRecord } from "./api/types";
+import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportRecord, AccountRef } from "./api/types";
 import { useHistory } from "./hooks/useHistory";
 import { useStatus } from "./hooks/useStatus";
 import { useAccounts } from "./hooks/useAccounts";
@@ -82,7 +82,7 @@ export type AppAction =
   | { type: "SET_SOURCE_FILE"; filename: string }
   | { type: "LOAD_RECEIPT"; receipt: Receipt; sourceFilename: string }
   | { type: "RECEIPT_READY_FOR_PENDING"; filename: string; receipt: Receipt }
-  | { type: "ACCOUNTS_LOADED"; accounts: string[]; defaultAccount: string }
+  | { type: "ACCOUNTS_LOADED"; accounts: AccountRef[]; defaultAccountId: string }
   | { type: "APPLY_PARSE_PROGRESS_EVENT"; event: ParseProgressEvent }
   | { type: "LOAD_BUFFERED_PROGRESS"; filename: string; events: ParseProgressEvent[] };
 
@@ -299,9 +299,13 @@ export function reducer(state: AppState, action: AppAction): AppState {
       // (useRetryableFetch returns a fresh array each poll) without effect.
       if (state.selectedAccount) return state;
       if (action.accounts.length === 0) return state;
-      const preferred = action.defaultAccount && action.accounts.includes(action.defaultAccount)
-        ? action.defaultAccount
-        : action.accounts[0];
+      // Prefer the configured default-account *id* when it still resolves
+      // to a real account; a stale/empty id (rename the migration could
+      // not reconcile, or deleted account) falls back to the first
+      // account's id — never persist or select an id that doesn't exist.
+      const preferred = action.defaultAccountId && action.accounts.some((a) => a.id === action.defaultAccountId)
+        ? action.defaultAccountId
+        : action.accounts[0].id;
       return { ...state, selectedAccount: preferred };
     }
     case "APPLY_PARSE_PROGRESS_EVENT": {
@@ -462,8 +466,8 @@ export default function App() {
   // so this effect just hands it the inputs. useRetryableFetch returns a
   // fresh array each poll — re-dispatches are no-ops by reducer design.
   useEffect(() => {
-    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccount: appConfig.defaultAccount });
-  }, [accounts, appConfig.defaultAccount]);
+    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccountId: appConfig.ynabAccountId });
+  }, [accounts, appConfig.ynabAccountId]);
 
   const handleFile = (file: File) => {
     // If the LLM is still warming up, don't enter the review flow — the
@@ -546,7 +550,7 @@ export default function App() {
   const handleQuickImport = async (filename: string) => {
     const pending = pendingFiles.find((f) => f.filename === filename);
     if (!pending?.receipt) return;
-    const account = state.selectedAccount || accounts[0];
+    const account = state.selectedAccount || accounts[0]?.id;
     if (!account) return;
     setImportingFile(filename);
     try {

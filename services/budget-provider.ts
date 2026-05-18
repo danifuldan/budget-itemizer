@@ -121,12 +121,11 @@ export const splitsSimilarity = (
   return union === 0 ? 1 : intersection / union;
 };
 
-/** An account's stable id plus its current display name. Identity is the
- *  id — a provider-side rename changes `name`, never `id`. */
-export interface AccountRef {
-  id: string;
-  name: string;
-}
+// AccountRef is cross-tier (FE picker consumes the same shape). Single
+// source in shared/types; re-exported here so existing service-side
+// imports (budget-ynab, account-identity, …) keep their path.
+export type { AccountRef } from "../shared/types";
+import type { AccountRef } from "../shared/types";
 
 export interface BudgetProvider {
   readonly id: "ynab" | "actual";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { reducer, initialState, type AppAction } from "./App";
-import type { Receipt } from "./api/types";
+import type { Receipt, AccountRef } from "./api/types";
 
 /**
  * Bug 2 regression: streamed line-item amounts are provisional (extracted
@@ -106,6 +106,50 @@ describe("reducer STREAM_DONE", () => {
     // A matched → amount refreshed to the reconciled 3; B unmatched → kept.
     expect(state.items[0].lineItemTotalAmount).toBe(3);
     expect(state.items[1].lineItemTotalAmount).toBe(1);
+  });
+
+  // Account identity is now the stable id, not the mutable display name.
+  // ACCOUNTS_LOADED must seed selectedAccount with an *id*, preferring the
+  // configured default-account id when it still resolves.
+  const accts: AccountRef[] = [
+    { id: "acc-1", name: "Wells Fargo Checking" },
+    { id: "acc-2", name: "Savings" },
+  ];
+
+  it("ACCOUNTS_LOADED selects the configured default-account id when it matches", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-2" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("acc-2");
+  });
+
+  // The disagreement: the stored default-account id no longer resolves
+  // (account was deleted, or config still holds an empty/stale id after a
+  // rename the migration couldn't reconcile). It must NOT keep the stale
+  // id — it falls back to the first available account's id so the picker
+  // shows a real, selectable account.
+  it("ACCOUNTS_LOADED falls back to the first account id when the default id no longer resolves", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-GONE" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("acc-1");
+  });
+
+  it("ACCOUNTS_LOADED is idempotent — never overrides an account the user already picked", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-1" } as AppAction,
+      { type: "SET_ACCOUNT", account: "acc-2" },
+      // A later poll re-emits with a different default — must not clobber.
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-1" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("acc-2");
+  });
+
+  it("ACCOUNTS_LOADED is a no-op on an empty accounts list", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: [], defaultAccountId: "acc-1" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("");
   });
 
   it("NAVIGATE carries an optional settingsSection (status-link deep-link)", () => {

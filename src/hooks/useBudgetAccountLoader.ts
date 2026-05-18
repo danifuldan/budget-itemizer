@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { apiFetch, apiPost } from "../api/client";
+import type { AccountRef } from "../api/types";
 
 export interface BudgetSummary {
   id: string;
@@ -9,10 +10,11 @@ export interface BudgetSummary {
 export interface BudgetAccountState {
   budgets: BudgetSummary[];
   selectedBudgetId: string;
-  accounts: string[];
+  accounts: AccountRef[];
   /** Populated only when `loadAllAccounts` is true (settings case).
    *  Surfaces hidden/closed accounts for the visibility toggle UI. */
-  allAccounts: string[];
+  allAccounts: AccountRef[];
+  /** The selected account *id* (stable identity), not its display name. */
   selectedAccount: string;
   loadingAccounts: boolean;
   /** Non-empty when a /accounts fetch failed after a successful budget
@@ -76,8 +78,8 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
 
   const [budgets, setBudgetsState] = useState<BudgetSummary[]>(initialBudgets);
   const [selectedBudgetId, setSelectedBudgetId] = useState(initialSelectedBudgetId);
-  const [accounts, setAccounts] = useState<string[]>([]);
-  const [allAccounts, setAllAccounts] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<AccountRef[]>([]);
+  const [allAccounts, setAllAccounts] = useState<AccountRef[]>([]);
   const [selectedAccount, setSelectedAccountState] = useState(initialSelectedAccount);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [error, setError] = useState("");
@@ -94,13 +96,13 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
   const fetchAccountsFor = async (token: number) => {
     setError("");
     try {
-      const accts = await apiFetch<string[]>("/accounts");
+      const accts = await apiFetch<AccountRef[]>("/accounts");
       if (inflightRef.current !== token) return; // stale — drop
       setAccounts(accts);
-      if (accts.length > 0) setSelectedAccountState(accts[0]);
+      if (accts.length > 0) setSelectedAccountState(accts[0].id);
 
       if (loadAllAccounts) {
-        const all = await apiFetch<string[]>("/accounts?all=true");
+        const all = await apiFetch<AccountRef[]>("/accounts?all=true");
         if (inflightRef.current !== token) return;
         setAllAccounts(all);
       }

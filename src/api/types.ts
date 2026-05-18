@@ -1,7 +1,7 @@
 // Cross-tier shapes (Receipt, ReceiptLineItem, ImportRecord) live in
 // `shared/types`. Re-export from the frontend side so existing callsites
 // under src/ keep working without a sweep.
-export type { Receipt, ReceiptLineItem, ImportRecord } from "../../shared/types";
+export type { Receipt, ReceiptLineItem, ImportRecord, AccountRef } from "../../shared/types";
 import type { Receipt } from "../../shared/types";
 
 // SSE event payloads from /parse-image/stream
