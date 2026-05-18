@@ -265,6 +265,36 @@ export const reconcileExtraction = (
   // whole point) and drop the refund so it isn't deducted or emitted as
   // a -refund split. The net-stated case already reconciles WITH the
   // refund, so this branch never fires there.
+  // Tax-from-anchors. SUBTOTAL and TOTAL are the two most reliably
+  // printed figures on a receipt (large, isolated). When the items
+  // reconcile to the printed SUBTOTAL but the components don't sum to
+  // the printed TOTAL, the gap is a mis-extracted TAX (a classic OCR
+  // digit slip on register tapes — e.g. $0.27 read as $0.20). Derive
+  // tax from the anchors instead of trusting the OCR'd tax cell.
+  //
+  // Guard so this never papers over a genuinely missing line/fee: only
+  // when items ≈ subtotal (items trusted) AND the derived tax is a
+  // plausible sales-tax rate (≤15% of subtotal). A larger residual is a
+  // missing fee, not a tax slip — leave it failing so it's caught.
+  if (
+    subtotal != null &&
+    total > 0 &&
+    Math.abs(finalItemSum - subtotal) <= 0.05 &&
+    totalDiff > 0.005
+  ) {
+    const derivedTax =
+      Math.round((total - subtotal - shipping - fees + effectiveDiscount + credit + refund) * 100) / 100;
+    const plausibleTax = derivedTax >= -0.005 && derivedTax <= subtotal * 0.15 + 0.01;
+    if (plausibleTax && Math.abs(derivedTax - (receipt.tax ?? 0)) > 0.005) {
+      console.log(
+        `  Validation: tax $${(receipt.tax ?? 0).toFixed(2)} inconsistent with subtotal $${subtotal.toFixed(2)} + total $${total.toFixed(2)} — deriving tax = $${derivedTax.toFixed(2)}`,
+      );
+      receipt.tax = derivedTax;
+      expectedTotal = finalItemSum + derivedTax + shipping + fees - effectiveDiscount - credit - refund;
+      totalDiff = Math.abs(expectedTotal - total);
+    }
+  }
+
   const curRefund = receipt.refund ?? 0;
   if (
     total > 0 &&

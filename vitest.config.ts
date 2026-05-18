@@ -12,7 +12,7 @@ export default defineConfig({
     // .claude/worktrees/*/node_modules) are excluded too — a bare
     // "node_modules/**" only matches the repo-root one and let a
     // worktree's bundled third-party tests (zod) into the run.
-    exclude: ["**/node_modules/**", "**/dist/**", "src-tauri/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "src-tauri/**", "**/.claude/**"],
     restoreMocks: true,
   },
 });

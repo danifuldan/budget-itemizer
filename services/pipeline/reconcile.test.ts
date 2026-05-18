@@ -129,6 +129,77 @@ describe("reconcileExtraction", () => {
     expect(receipt.lineItems![1].lineItemTotalAmount).toBe(20);
   });
 
+  // #91-3: register-tape OCR slipped the TAX cell ($0.27 read as
+  // $0.20). Items reconcile to the printed SUBTOTAL and TOTAL is clear,
+  // so tax is derivable from those two anchors — no need to trust the
+  // OCR'd tax digit. The whole $0.07 miss is exactly the tax error.
+  it("derives tax from subtotal+total anchors when the OCR'd tax is wrong", () => {
+    const warnSpy = vi.spyOn(console, "warn");
+    const receipt = {
+      merchant: "Walmart",
+      transactionDate: "2026-02-03",
+      memo: "",
+      totalAmount: 24.96,
+      category: "",
+      lineItems: [
+        { productName: "BAGUETTE", quantity: 1, lineItemTotalAmount: 1.97, category: "" },
+        { productName: "ROSEMARY", quantity: 1, lineItemTotalAmount: 2.96, category: "" },
+        { productName: "PROGRSO SOU", quantity: 2, lineItemTotalAmount: 5.36, category: "" },
+        { productName: "PROGRSO SOU", quantity: 1, lineItemTotalAmount: 2.68, category: "" },
+        { productName: "WLSW BLK LM", quantity: 1, lineItemTotalAmount: 4.17, category: "" },
+        { productName: "WLSW SHR BR", quantity: 1, lineItemTotalAmount: 4.17, category: "" },
+        { productName: "GLASSES", quantity: 1, lineItemTotalAmount: 3.38, category: "" },
+      ],
+      tax: 0.2, // OCR misread of 0.27
+      shipping: 0,
+      discount: 0,
+      refund: 0,
+    };
+    const labels: LabelResult = {
+      merchant: "Walmart",
+      dateLabel: "",
+      totalLabel: "Total",
+      summaryLabels: [],
+      lineItems: [],
+    };
+    reconcileExtraction(receipt, labels, "Subtotal $24.69\nTax $0.20\nTotal $24.96", []);
+    expect(receipt.tax).toBeCloseTo(0.27, 2);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("differs from extracted total"),
+    );
+  });
+
+  // The disagreement / safety: a LARGE residual is a missing fee/line,
+  // NOT a tax slip. Deriving tax here would mask a $5 delivery fee as
+  // "tax" (the #91-2 Walmart case). It must NOT fire when the implied
+  // tax rate is implausible — the failure must stay a failure.
+  it("does NOT absorb a missing fee into tax (large residual is not a tax slip)", () => {
+    const receipt = {
+      merchant: "Walmart",
+      transactionDate: "2026-02-03",
+      memo: "",
+      totalAmount: 39.93, // 33.74 items + $5 fee + $1.19 tax (fee+tax missed)
+      category: "",
+      lineItems: [
+        { productName: "Item A", quantity: 1, lineItemTotalAmount: 33.74, category: "" },
+      ],
+      tax: 0,
+      shipping: 0,
+      discount: 0,
+      refund: 0,
+    };
+    const labels: LabelResult = {
+      merchant: "Walmart",
+      dateLabel: "",
+      totalLabel: "Total",
+      summaryLabels: [],
+      lineItems: [],
+    };
+    reconcileExtraction(receipt, labels, "Subtotal $33.74\nTotal $39.93", []);
+    // $6.19 / $33.74 ≈ 18% — implausible as tax; must not be fabricated.
+    expect(receipt.tax).toBe(0);
+  });
+
   // #91: Amazon "Grand Total" is the GROSS charge; a "Refund Total"
   // shown alongside it is a SEPARATE later credit, not a reduction of
   // that total. Import the gross (it matches the bank charge — we're in
