@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reducer, initialState, type AppAction } from "./App";
+import { reducer, initialState, discardTargetFor, type AppAction } from "./App";
 import type { Receipt, AccountRef } from "./api/types";
 
 /**
@@ -184,5 +184,73 @@ describe("reducer STREAM_DONE", () => {
     // A plain settings open (no section) must not carry a stale target.
     const plain = fold([{ type: "NAVIGATE", view: "settings" } as AppAction]);
     expect(plain.settingsSection).toBeUndefined();
+  });
+});
+
+// Bug: in-review Discard for a receipt opened from HISTORY fired the
+// pending-watcher delete (DELETE /watcher/pending/{filename}) -> 404,
+// silent no-op. LOAD_RECEIPT dropped the history record id, and the only
+// origin signal was sourceFilename, which a history receipt also sets,
+// so the JSX ternary always chose the pending route. The discard target
+// must differ by origin: history -> DELETE /history/{id}; pending ->
+// skip pending. This is the "test the disagreement" probe.
+const historyReceipt: Receipt = {
+  merchant: "Walmart",
+  transactionDate: "2026-05-18",
+  memo: "",
+  totalAmount: 33.66,
+  category: "Groceries",
+  lineItems: [
+    { productName: "Black beans 15oz can", quantity: 1, lineItemTotalAmount: 33.66, category: "Groceries" },
+  ],
+};
+
+describe("reducer LOAD_RECEIPT origin (history vs pending)", () => {
+  it("LOAD_RECEIPT from history records the history id in state", () => {
+    const s = fold([
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "Walmart_receipt.pdf", historyId: "hist-1" } as AppAction,
+    ]);
+    expect(s.view).toBe("review");
+    expect(s.sourceFilename).toBe("Walmart_receipt.pdf");
+    expect(s.historyId).toBe("hist-1");
+  });
+
+  it("LOAD_RECEIPT from a pending file leaves historyId null", () => {
+    const s = fold([
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "watched.pdf" } as AppAction,
+    ]);
+    expect(s.sourceFilename).toBe("watched.pdf");
+    expect(s.historyId).toBeNull();
+  });
+
+  it("a falsy history id is normalized to null, not stored as \"\"", () => {
+    // Invariant: historyId is a non-empty string OR null — never "".
+    // Otherwise discardTargetFor's truthiness gate silently routes a
+    // history receipt back to the pending (404) path.
+    const s = fold([
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "Walmart_receipt.pdf", historyId: "" } as AppAction,
+    ]);
+    expect(s.historyId).toBeNull();
+    expect(discardTargetFor(s)).toEqual({ kind: "pending", filename: "Walmart_receipt.pdf" });
+  });
+});
+
+describe("discardTargetFor — history-origin vs pending-origin discard route", () => {
+  it("a history-loaded receipt discards via /history/{id}, NOT the pending route", () => {
+    const s = fold([
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "Walmart_receipt.pdf", historyId: "hist-1" } as AppAction,
+    ]);
+    expect(discardTargetFor(s)).toEqual({ kind: "history", id: "hist-1" });
+  });
+
+  it("a pending-loaded receipt discards via the pending-watcher delete", () => {
+    const s = fold([
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "watched.pdf" } as AppAction,
+    ]);
+    expect(discardTargetFor(s)).toEqual({ kind: "pending", filename: "watched.pdf" });
+  });
+
+  it("no source -> no discard target (button hidden)", () => {
+    expect(discardTargetFor(initialState)).toBeNull();
   });
 });

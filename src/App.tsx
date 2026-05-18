@@ -61,6 +61,10 @@ export interface AppState {
   lastFile: File | null;
   setupDismissed: boolean;
   sourceFilename: string | null;
+  /** Set only when the review screen was opened from a HISTORY record
+   *  (vs a pending/streamed file). Drives which delete route Discard
+   *  uses — see discardTargetFor. null for pending/streamed receipts. */
+  historyId: string | null;
   /** When navigating to Settings via a status-link, the section to scroll
    *  to (e.g. "folder-watcher", "ai-model"). undefined = top. */
   settingsSection?: string;
@@ -87,7 +91,7 @@ export type AppAction =
   | { type: "NAVIGATE"; view: View; settingsSection?: string }
   | { type: "DISMISS_SETUP" }
   | { type: "SET_SOURCE_FILE"; filename: string }
-  | { type: "LOAD_RECEIPT"; receipt: Receipt; sourceFilename: string }
+  | { type: "LOAD_RECEIPT"; receipt: Receipt; sourceFilename: string; historyId?: string }
   | { type: "RECEIPT_READY_FOR_PENDING"; filename: string; receipt: Receipt }
   | { type: "ACCOUNTS_LOADED"; accounts: AccountRef[]; defaultAccountId: string }
   | { type: "APPLY_PARSE_PROGRESS_EVENT"; event: ParseProgressEvent }
@@ -115,7 +119,23 @@ export const initialState: AppState = {
   lastFile: null,
   setupDismissed: false,
   sourceFilename: null,
+  historyId: null,
 };
+
+/** Single source of truth for where an in-review Discard sends its
+ *  delete. A receipt opened from history must go to DELETE /history/{id};
+ *  a pending/streamed one to the pending-watcher delete. The decision
+ *  used to live as an inline JSX ternary that only knew sourceFilename
+ *  (which both origins set), so history discards 404'd silently. */
+export type DiscardTarget =
+  | { kind: "history"; id: string }
+  | { kind: "pending"; filename: string };
+
+export function discardTargetFor(state: AppState): DiscardTarget | null {
+  if (state.historyId) return { kind: "history", id: state.historyId };
+  if (state.sourceFilename) return { kind: "pending", filename: state.sourceFilename };
+  return null;
+}
 
 export function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -271,6 +291,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
           category: li.category || "",
         })),
         sourceFilename: action.sourceFilename,
+        historyId: action.historyId || null,
       };
     case "RECEIPT_READY_FOR_PENDING": {
       // Apply only when viewing the streaming progress for this file and it
@@ -569,7 +590,7 @@ export default function App() {
 
   const handleViewHistory = (record: ImportRecord) => {
     if (record.receipt) {
-      dispatch({ type: "LOAD_RECEIPT", receipt: record.receipt, sourceFilename: record.filename });
+      dispatch({ type: "LOAD_RECEIPT", receipt: record.receipt, sourceFilename: record.filename, historyId: record.id });
     }
   };
 
@@ -793,10 +814,15 @@ export default function App() {
           selectedAccount={state.selectedAccount}
           onAccountChange={(a) => dispatch({ type: "SET_ACCOUNT", account: a })}
           onOpen={refreshAccounts}
-          onDiscard={state.sourceFilename ? () => {
-            handleSkipPending(state.sourceFilename!);
-            abort();
-          } : undefined}
+          onDiscard={(() => {
+            const dt = discardTargetFor(state);
+            if (!dt) return undefined;
+            return () => {
+              if (dt.kind === "history") remove(dt.id);
+              else handleSkipPending(dt.filename);
+              abort();
+            };
+          })()}
           onImport={handleImport}
           importDisabled={!state.streamDone || state.items.length === 0 || !state.selectedAccount}
           importing={state.importing}
