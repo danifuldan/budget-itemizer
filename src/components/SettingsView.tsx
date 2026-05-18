@@ -7,6 +7,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
+import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { apiFetch, apiPost } from "../api/client";
 import Toggle from "./Toggle";
 import TitlebarRegion from "./TitlebarRegion";
@@ -107,6 +108,15 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     initialSelectedBudgetId: savedBudgetId || "",
     initialSelectedAccount: config.ynabAccountId || "",
   });
+
+  // Resync the Default Account + Account Visibility lists when the user
+  // returns to the app while Settings is open (the Visibility list has no
+  // dropdown-open hook to hang a refresh on). Throttled; only when a
+  // budget is selected. Landing on Settings is already covered by the
+  // mount effect's refreshAccounts().
+  useFocusRefresh(() => {
+    if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts();
+  }, 30_000);
 
   const ynabTest = useYnabTest({
     onTested: async (result) => {
@@ -466,6 +476,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                 className="select"
                 value={selectedAccountId}
                 onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
+                onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
                 disabled={loadingAccounts}
               >
                 {loadingAccounts && <option value="">Loading accounts...</option>}

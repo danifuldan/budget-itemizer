@@ -519,6 +519,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
               className="select"
               value={selectedAccountId}
               onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
+              onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
               disabled={loadingAccounts || accounts.length === 0}
             >
               {accounts.length === 0 && <option value="">{loadingAccounts ? "Loading..." : "Select budget first"}</option>}

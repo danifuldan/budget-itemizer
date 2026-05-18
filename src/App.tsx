@@ -4,6 +4,7 @@ import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportReco
 import { useHistory } from "./hooks/useHistory";
 import { useStatus } from "./hooks/useStatus";
 import { useAccounts } from "./hooks/useAccounts";
+import { useFocusRefresh } from "./hooks/useFocusRefresh";
 import { useCategories } from "./hooks/useCategories";
 import { useReceiptStream } from "./hooks/useReceiptStream";
 import DropZone from "./components/DropZone";
@@ -406,7 +407,11 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
-  const accounts = useAccounts(status.setupComplete);
+  const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
+  // Resync the account list when the user comes back to the app, so a
+  // YNAB-side rename shows up without waiting for the next poll. The 60s
+  // server cache bounds the API cost; 30s throttle bounds the trigger.
+  useFocusRefresh(refreshAccounts, 30_000);
   const categories = useCategories(status.setupComplete);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
@@ -764,6 +769,7 @@ export default function App() {
           accounts={accounts}
           selectedAccount={state.selectedAccount}
           onAccountChange={(a) => dispatch({ type: "SET_ACCOUNT", account: a })}
+          onOpen={refreshAccounts}
           onDiscard={state.sourceFilename ? () => {
             handleSkipPending(state.sourceFilename!);
             abort();
