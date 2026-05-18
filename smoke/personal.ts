@@ -273,6 +273,51 @@ async function parseReceipt(port: number, pdfPath: string): Promise<ReceiptShape
   return receipt;
 }
 
+interface AccountRefShape { id: string; name: string }
+
+// Resolve the account *id* the same way the app now does: account
+// identity is the stable id, not the mutable display name. This also
+// makes Tier B the gold test for the renamed-account path — when
+// config.defaultAccount no longer matches any live account name (a YNAB
+// rename), we fall back to the sole account, exactly as the reducer's
+// provisional pick does for a single-account budget.
+async function resolveAccountId(
+  port: number,
+  cfg: { ynabAccountId?: string; defaultAccount?: string },
+): Promise<AccountRefShape> {
+  const res = await fetch(`http://127.0.0.1:${port}/accounts`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) throw new Error(`/accounts → ${res.status}: ${await res.text()}`);
+  const accounts = (await res.json()) as AccountRefShape[];
+  if (accounts.length === 0) throw new Error("/accounts returned no accounts");
+
+  const byId = cfg.ynabAccountId && accounts.find((a) => a.id === cfg.ynabAccountId);
+  if (byId) return byId;
+  const byName = cfg.defaultAccount && accounts.find((a) => a.name === cfg.defaultAccount);
+  if (byName) return byName;
+  if (accounts.length === 1) return accounts[0]; // rename: name no longer resolves
+  throw new Error(
+    `Cannot resolve a target account: config has no ynabAccountId, defaultAccount ` +
+    `${JSON.stringify(cfg.defaultAccount)} matches no live account, and the budget ` +
+    `has ${accounts.length} accounts. Re-select the account in Settings.`,
+  );
+}
+
+// The server saves the upload under sanitizeReceiptFilename(file.name)
+// and keys the pending/claim entry by THAT name — not the raw basename.
+// The real FE learns the registered name from the pending list; mirror
+// that here (snapshot before/after parse) so /import's claim matches.
+// Reimplementing the sanitizer here would just drift from it.
+async function pendingFilenames(port: number): Promise<Set<string>> {
+  const res = await fetch(`http://127.0.0.1:${port}/watcher/pending`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) return new Set();
+  const list = (await res.json()) as Array<{ filename: string }>;
+  return new Set(list.map((p) => p.filename));
+}
+
 async function importReceipt(port: number, account: string, receipt: ReceiptShape, sourceFilename: string, marker: string): Promise<void> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), IMPORT_TIMEOUT_MS);
@@ -346,11 +391,12 @@ async function main() {
     fs.readFileSync(path.join(REAL_CONFIG_DIR, "config.json"), "utf8"),
   );
   const budgetId: string = realConfig.ynabBudgetId;
-  const account: string = realConfig.defaultAccount;
-  if (!budgetId || !account) {
-    console.error("config.ynabBudgetId or config.defaultAccount is empty. Finish setup wizard first.");
+  if (!budgetId) {
+    console.error("config.ynabBudgetId is empty. Finish setup wizard first.");
     process.exit(1);
   }
+  // The account id is resolved from the live /accounts list AFTER boot
+  // (it reflects YNAB renames); config alone can be stale.
   const ynabToken = await getKeychainSecret("ynab-api-key");
 
   // Tag every smoke-imported transaction with a unique marker. Teardown
@@ -364,7 +410,7 @@ async function main() {
   // week create YNAB transactions dated last week, not today.
   const sinceDate = isoNDaysAgo(30);
 
-  console.log(`Budget: ${budgetId}  Account: ${account}`);
+  console.log(`Budget: ${budgetId}`);
   console.log(`Fixtures: ${fixtures.length} from ${fixturesDir}`);
   console.log(`Smoke marker: ${marker} (teardown deletes any tx whose memo starts with this)\n`);
 
@@ -395,15 +441,31 @@ async function main() {
     const port = await waitForBootHandshake(child);
     console.log(`Sidecar listening on ${port}. Waiting for llmReady...`);
     await waitForLlmReady(port);
-    console.log("LLM ready.\n");
+    console.log("LLM ready.");
+
+    const target = await resolveAccountId(port, {
+      ynabAccountId: realConfig.ynabAccountId,
+      defaultAccount: realConfig.defaultAccount,
+    });
+    const account = target.id;
+    console.log(
+      `Account: ${target.name} (id ${account})` +
+      (realConfig.defaultAccount && realConfig.defaultAccount !== target.name
+        ? ` — config.defaultAccount=${JSON.stringify(realConfig.defaultAccount)} no longer matches (rename); resolved via /accounts`
+        : ""),
+    );
+    console.log();
 
     for (const pdfPath of fixtures) {
       const filename = path.basename(pdfPath);
       console.log(`→ ${filename}`);
       const t0 = Date.now();
       try {
+        const before = await pendingFilenames(port);
         const receipt = await parseReceipt(port, pdfPath);
-        await importReceipt(port, account, receipt, filename, marker);
+        const after = await pendingFilenames(port);
+        const registered = [...after].find((n) => !before.has(n)) ?? filename;
+        await importReceipt(port, account, receipt, registered, marker);
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
         console.log(`  ✓ parsed + imported (${elapsed}s) — total $${receipt.totalAmount.toFixed(2)}, ${receipt.lineItems?.length ?? 0} items\n`);
         importedCount++;
