@@ -13,6 +13,7 @@ import {
   splitsSimilarity,
   type BudgetProvider,
   type ResolvedSplit,
+  type AccountRef,
 } from "./budget-provider";
 import { writeRestrictedFile, ensureRestrictedDir } from "../utils/restricted-file";
 
@@ -183,6 +184,15 @@ let _categoriesInFlight: { key: string; promise: Promise<string[]> } | null = nu
 const cacheKeyForCategories = (): string =>
   `${getBudgetId()}::${(getAllowedCategories() ?? []).join(",")}`;
 
+// Accounts cache: shorter TTL than categories (60s vs 5m) because the FE
+// refetches on picker-open / throttled focus specifically so a rename
+// surfaces fast — but the per-token quota is 200/hr, so a burst still
+// has to collapse to one call. Keyed by budget id; no disk stash /
+// circuit breaker (the list only matters while actively picking).
+const ACCOUNTS_TTL_MS = 60 * 1000;
+let _accountsCache: { key: string; value: AccountRef[]; expiresAt: number } | null = null;
+let _accountsInFlight: { key: string; promise: Promise<AccountRef[]> } | null = null;
+
 // Persistent fallback: the last successful category fetch is stashed to
 // disk so that transient YNAB outages (no internet, rate-limit lockout,
 // YNAB downtime) don't block parsing. Categories change rarely — a
@@ -231,6 +241,11 @@ export const _resetCategoriesCacheForTests = () => {
   _categoriesInFlight = null;
   _lastFetchUsedStash = false;
   _onReconnect = null;
+};
+
+export const _resetAccountsCacheForTests = () => {
+  _accountsCache = null;
+  _accountsInFlight = null;
 };
 
 // Like the full reset but preserves the "previous fetch used stash"
@@ -383,17 +398,36 @@ export class YnabBudgetProvider implements BudgetProvider {
     }
   }
 
-  async getAllAccounts(): Promise<string[]> {
-    const budget = await getBudgets().getBudgetById(getBudgetId()).catch(wrapYnabError);
-
-    const accounts = budget.data.budget.accounts
-      ?.filter((a) => !a.deleted && !a.closed)
-      .map((a) => ({ id: a.id, name: a.name }));
-
-    if (!accounts) {
-      throw new Error("No accounts found");
+  async getAllAccounts(): Promise<AccountRef[]> {
+    const key = getBudgetId();
+    const now = Date.now();
+    if (_accountsCache && _accountsCache.key === key && _accountsCache.expiresAt > now) {
+      return _accountsCache.value;
+    }
+    // Coalesce concurrent calls onto a single in-flight fetch.
+    if (_accountsInFlight && _accountsInFlight.key === key) {
+      return _accountsInFlight.promise;
     }
 
+    const fetchPromise = (async () => {
+      const budget = await getBudgets().getBudgetById(key).catch(wrapYnabError);
+      const accounts = budget.data.budget.accounts
+        ?.filter((a) => !a.deleted && !a.closed)
+        .map((a) => ({ id: a.id, name: a.name }));
+      if (!accounts) {
+        throw new Error("No accounts found");
+      }
+      return accounts;
+    })();
+    _accountsInFlight = {
+      key,
+      promise: fetchPromise.finally(() => {
+        if (_accountsInFlight && _accountsInFlight.key === key) _accountsInFlight = null;
+      }),
+    };
+
+    const accounts = await _accountsInFlight.promise;
+    _accountsCache = { key, value: accounts, expiresAt: Date.now() + ACCOUNTS_TTL_MS };
     return accounts;
   }
 
@@ -673,6 +707,8 @@ export class YnabBudgetProvider implements BudgetProvider {
     // and a stale category list after the user changed budgets (F7/F9).
     _categoriesCache = null;
     _categoriesInFlight = null;
+    _accountsCache = null;
+    _accountsInFlight = null;
     _api = null;
     _budgets = null;
     _transactions = null;
