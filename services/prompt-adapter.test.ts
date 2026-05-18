@@ -192,11 +192,13 @@ describe("adaptPrompt — JSON-reminder adapters (llama3.1, default)", () => {
     expect(lastUser?.content).toContain("Respond with valid JSON only");
   });
 
-  // #91-2: the bundled llama3.1 dropped Walmart's oddly-labeled
-  // expedite-delivery fee ("3 hours or less") and tax from
-  // summaryLabels. It must receive the online-order few-shot that
-  // teaches that pattern (previously wired only to llama3.2:3b).
-  it("injects the online-order expedite-fee few-shot for llama3.1 label-extraction", () => {
+  // #91-2: the bundled llama3.1 must receive the online-order few-shot
+  // so it learns the PRINCIPLE — a priced delivery-speed line is a fee
+  // even when the label names no fee. It must teach that with a
+  // representative label, NOT the literal string from the receipt that
+  // first exposed the gap ("3 hours or less"): teaching the test string
+  // would prove memorization, not generalization.
+  it("teaches the priced-delivery-speed-line→fee principle for llama3.1, not the test string", () => {
     const result = adaptPrompt(
       "llama3.1:8b",
       "label-extraction",
@@ -204,9 +206,10 @@ describe("adaptPrompt — JSON-reminder adapters (llama3.1, default)", () => {
       sampleSchema,
     );
     const allText = result.messages.map((m) => String(m.content)).join("\n");
-    expect(allText).toContain("3 hours or less");
-    // And it must classify that line as a fee in the few-shot answer.
-    expect(allText).toMatch(/"label"\s*:\s*"3 hours or less"\s*,\s*"type"\s*:\s*"fee"/);
+    // The few-shot is wired in and classifies a delivery-speed line as a fee...
+    expect(allText).toMatch(/"label"\s*:\s*"[^"]*(?:Express|Priority|Same-?day|hour)[^"]*"\s*,\s*"type"\s*:\s*"fee"/i);
+    // ...but NOT by parroting the exact label from the failing receipt.
+    expect(allText).not.toContain("3 hours or less");
   });
 
   it("appends JSON reminder for unknown models (default fallthrough)", () => {

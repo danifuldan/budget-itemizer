@@ -236,7 +236,7 @@ Sourdough Bread     $5.49
 Subtotal            $11.37
 Savings             -$0.50
 Tax                 $0.91
-3 hours or less     $5.00
+Express delivery    $5.00
 Driver tip          Free
 Delivery            Free
 
@@ -256,10 +256,13 @@ VISA ending in 1234`,
       { label: "Subtotal", type: "subtotal" },
       { label: "Savings", type: "discount" },
       { label: "Tax", type: "tax" },
-      // Delivery-SPEED lines with a price ("3 hours or less", "Express",
-      // "2-hour") are an expedited-delivery FEE, even though the label
-      // names no fee. Capture them; never skip a priced summary line.
-      { label: "3 hours or less", type: "fee" },
+      // Principle (not a string to match): ANY priced summary line is a
+      // charge. A line whose label is a delivery SPEED/tier rather than
+      // a fee word — "Express delivery", "Priority", "Same-day",
+      // "2-hour", "3 hours or less", etc. — is still an expedited-
+      // delivery FEE. Classify by economic role, never skip a priced
+      // summary line because its label names no fee.
+      { label: "Express delivery", type: "fee" },
       { label: "Driver tip", type: "fee" },
       { label: "Delivery", type: "shipping" },
     ],
