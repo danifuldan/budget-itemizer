@@ -49,7 +49,7 @@ Then open the app normally.
 
 #### Where does my data go?
 
-Your data goes to *your* YNAB account, from *your* computer. That's it. Budget Itemizer is not a cloud service — there's no server we run, no account you create with us, no telemetry, and no analytics. The receipt parsing happens locally on your machine via a bundled language model. The only network requests are the YNAB API calls from they app to your account, plus the one-time model download from [Hugging Face](https://huggingface.co/) during setup. The code is open — you can read it and verify.
+Your data goes to *your* YNAB account, from *your* computer. That's it. Budget Itemizer is not a cloud service — there's no server we run, no account you create with us, no telemetry, and no analytics. The receipt parsing happens locally on your machine via a bundled language model. The only network requests are the YNAB API calls from they app to your account, plus the one-time model download from [Hugging Face](https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF) during setup. The code is open — you can read it and verify.
 
 #### Does my data go to OpenAI, Anthropic, or any other AI company?
 
