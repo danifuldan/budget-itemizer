@@ -1,5 +1,16 @@
 # TODO
 
+## Docs to write
+
+- [ ] **Preferred PDF extraction method** (README/FAQ + setup wizard hint).
+  Gist: print/save the *receipt page itself* to PDF via the browser
+  (Cmd-P → Save as PDF), NOT the vendor site's built-in "Print
+  receipt/invoice" button — the built-in one often produces a
+  reflowed/stripped layout the parser handles worse. **Confirm exact
+  wording with the user — they were unsure of the precise method.**
+- [ ] **Account identity sync** (see backlog item below) — once fixed,
+  document that renaming an account in YNAB is safe.
+
 ## Concurrency audit backlog (2026-05-17, hostile race sweep)
 
 Each fixed via TDD + executed pre-mortem probe, grouped by shared file.
