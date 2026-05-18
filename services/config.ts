@@ -18,6 +18,9 @@ export interface AppConfig {
   ynabApiKey: string;
   ynabBudgetId: string;
   ynabCategoryGroups: string[];
+  /** Stable YNAB account id (identity). `defaultAccount` is the display
+   *  name only — a YNAB rename changes the name, never the id. */
+  ynabAccountId: string;
   defaultAccount: string;
   inboxPath: string;
   processedPath: string;
@@ -47,6 +50,7 @@ const defaults: AppConfig = {
   ynabApiKey: "",
   ynabBudgetId: "",
   ynabCategoryGroups: [],
+  ynabAccountId: "",
   defaultAccount: "",
   inboxPath: path.join(os.homedir(), "Receipts", "inbox"),
   processedPath: path.join(os.homedir(), "Receipts", "processed"),

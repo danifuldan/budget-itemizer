@@ -42,6 +42,7 @@ const configUpdateSchema = z.object({
   ynabApiKey: z.string().max(SECRET_MAX).optional(),
   ynabBudgetId: z.string().max(NAME_MAX).optional(),
   ynabCategoryGroups: z.array(z.string().max(NAME_MAX)).max(256).optional(),
+  ynabAccountId: z.string().max(NAME_MAX).optional(),
   defaultAccount: z.string().max(NAME_MAX).optional(),
   inboxPath: z.string().max(PATH_MAX).optional(),
   processedPath: z.string().max(PATH_MAX).optional(),

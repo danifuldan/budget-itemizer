@@ -1,0 +1,98 @@
+// Account identity is moving from a mutable display NAME to the stable
+// YNAB account id. migrateAccountIdentity is the one-time, idempotent,
+// best-effort reconciler. The load-bearing case is the disagreement: the
+// stored name no longer exists in YNAB (user renamed the account) — it
+// must NOT crash, NOT block, and NOT guess; it leaves the id empty so the
+// picker can re-select. Resolver + persist are injected (no network).
+import { describe, it, expect, vi } from "vitest";
+import { migrateAccountIdentity } from "./account-identity";
+import type { AccountRef } from "./account-identity";
+
+const ynab = (over: Partial<Parameters<typeof migrateAccountIdentity>[0]> = {}) => ({
+  budgetProvider: "ynab",
+  ynabAccountId: "",
+  defaultAccount: "",
+  hiddenAccounts: [] as string[],
+  ...over,
+});
+
+describe("migrateAccountIdentity", () => {
+  it("renamed account: stored name absent in YNAB → id stays empty, no throw, no guess", async () => {
+    const persist = vi.fn();
+    const out = await migrateAccountIdentity(
+      ynab({ defaultAccount: "Bank of America" }),
+      async (): Promise<AccountRef[]> => [{ id: "acc1", name: "Wells Fargo Checking" }],
+      persist,
+    );
+    expect(out.ynabAccountId).toBe(""); // unresolved — picker re-selects
+    expect(persist).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ynabAccountId: expect.stringMatching(/.+/) }),
+    );
+  });
+
+  it("resolvable name → id is set and persisted", async () => {
+    const persist = vi.fn();
+    const out = await migrateAccountIdentity(
+      ynab({ defaultAccount: "Wells Fargo Checking" }),
+      async () => [{ id: "acc1", name: "Wells Fargo Checking" }],
+      persist,
+    );
+    expect(out.ynabAccountId).toBe("acc1");
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ ynabAccountId: "acc1" }));
+  });
+
+  it("idempotent: already-migrated config is a no-op (no persist, no needless resolve cost)", async () => {
+    const persist = vi.fn();
+    const resolve = vi.fn(async () => [{ id: "acc1", name: "Wells Fargo Checking" }]);
+    await migrateAccountIdentity(
+      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", hiddenAccounts: ["acc1"] }),
+      resolve,
+      persist,
+    );
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("hiddenAccounts: names → ids, unresolvable dropped, existing ids kept", async () => {
+    const persist = vi.fn();
+    const out = await migrateAccountIdentity(
+      ynab({
+        ynabAccountId: "acc1",
+        defaultAccount: "Wells Fargo Checking",
+        hiddenAccounts: ["Old Closed Acct", "Savings", "acc1"],
+      }),
+      async () => [
+        { id: "acc1", name: "Wells Fargo Checking" },
+        { id: "acc9", name: "Savings" },
+      ],
+      persist,
+    );
+    expect(out.hiddenAccounts.sort()).toEqual(["acc1", "acc9"]);
+    expect(persist).toHaveBeenCalledWith(
+      expect.objectContaining({ hiddenAccounts: expect.arrayContaining(["acc1", "acc9"]) }),
+    );
+  });
+
+  it("non-ynab provider → no-op even with stale data", async () => {
+    const persist = vi.fn();
+    await migrateAccountIdentity(
+      { budgetProvider: "actual", ynabAccountId: "", defaultAccount: "Stale", hiddenAccounts: ["x"] },
+      async () => [{ id: "a", name: "b" }],
+      persist,
+    );
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("resolver throws → best-effort no-op, never throws", async () => {
+    const persist = vi.fn();
+    await expect(
+      migrateAccountIdentity(
+        ynab({ defaultAccount: "Bank of America" }),
+        async () => {
+          throw new Error("YNAB unreachable");
+        },
+        persist,
+      ),
+    ).resolves.toBeDefined();
+    expect(persist).not.toHaveBeenCalled();
+  });
+});
