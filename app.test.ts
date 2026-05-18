@@ -429,6 +429,124 @@ describe("Hono app integration", () => {
     expect(releaseImportClaim).toHaveBeenCalledWith("walmart-receipt.pdf");
   });
 
+  it("POST /import surfaces a YNAB client-validation (400 bad_request) error as an actionable 4xx, not a generic 500", async () => {
+    // Real Tier B finding: YNAB rejected every import with
+    // 400 bad_request "date must not be in the future or over 5 years
+    // ago". rateLimitOr500 only special-cased 429, so this perfectly
+    // actionable message was swallowed as the generic
+    // "Internal error — see logs for details." 500. The user could
+    // never tell what to fix.
+    vi.mocked(claimForImport).mockReturnValue(true);
+    const ynabErr: any = new Error(
+      "Failed to import the receipt: YNAB returned an unexpected error.",
+    );
+    // Shape the ynab SDK surfaces through ReceiptImportError.cause.
+    ynabErr.cause = {
+      error: {
+        id: "400",
+        name: "bad_request",
+        detail: "date must not be in the future or over 5 years ago",
+      },
+    };
+    vi.mocked(importReceiptToYnab).mockRejectedValue(ynabErr);
+
+    const res = await app.request("/import", {
+      method: "POST",
+      headers: { Authorization: authHeader, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: "Checking",
+        sourceFilename: "walmart-receipt.pdf",
+        receipt: {
+          merchant: "Walmart",
+          transactionDate: "2026-11-07",
+          memo: "Groceries",
+          totalAmount: 42.99,
+          category: "Groceries",
+        },
+      }),
+    });
+
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    const body = await res.json();
+    expect(body.error).toContain(
+      "date must not be in the future or over 5 years ago",
+    );
+    expect(body.error).not.toContain("Internal error");
+    expect(releaseImportClaim).toHaveBeenCalledWith("walmart-receipt.pdf");
+  });
+
+  it("POST /import surfaces a YNAB 400 carried through a NESTED cause chain (production shape)", async () => {
+    // In production the chain is deeper than the single-level shape:
+    // ReceiptImportError → cause BudgetConnectionError → cause {error:{…}}.
+    // The detector must walk the whole cause chain, not just cause.error.
+    vi.mocked(claimForImport).mockReturnValue(true);
+    const rawYnab: any = { error: { id: "400", name: "bad_request", detail: "category not found" } };
+    const wrapped: any = new Error("YNAB returned an unexpected error.");
+    wrapped.cause = rawYnab;
+    const outer: any = new Error("Failed to import the receipt: YNAB returned an unexpected error.");
+    outer.cause = wrapped;
+    vi.mocked(importReceiptToYnab).mockRejectedValue(outer);
+
+    const res = await app.request("/import", {
+      method: "POST",
+      headers: { Authorization: authHeader, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: "Checking",
+        receipt: {
+          merchant: "Walmart",
+          transactionDate: "2026-01-15",
+          memo: "Groceries",
+          totalAmount: 42.99,
+          category: "Groceries",
+        },
+      }),
+    });
+
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    const body = await res.json();
+    expect(body.error).toContain("category not found");
+    expect(body.error).not.toContain("Internal error");
+  });
+
+  it("POST /import: a connection-class failure (no error.detail in the cause chain) stays a generic 500, not a false 422", async () => {
+    // Pre-mortem Bug 1 probe (executed, not reasoned): the cause-chain
+    // walk must NOT fabricate a "YNAB rejected this receipt" message
+    // for a transient network failure. ReceiptImportError → cause
+    // BudgetConnectionError → cause bare Error("fetch failed"): no
+    // {error:{detail}} anywhere, so the detector must return null and
+    // the response must be the unchanged generic 500.
+    vi.mocked(claimForImport).mockReturnValue(true);
+    const netErr: any = new Error("fetch failed");
+    const conn: any = new Error("Could not connect to YNAB. Check your API key and internet connection in Settings.");
+    conn.cause = netErr;
+    const outer: any = new Error("Failed to import the receipt: Could not connect to YNAB.");
+    outer.cause = conn;
+    vi.mocked(importReceiptToYnab).mockRejectedValue(outer);
+
+    const res = await app.request("/import", {
+      method: "POST",
+      headers: { Authorization: authHeader, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: "Checking",
+        receipt: {
+          merchant: "Walmart",
+          transactionDate: "2026-01-15",
+          memo: "Groceries",
+          totalAmount: 42.99,
+          category: "Groceries",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).not.toContain("YNAB rejected this receipt");
+  });
+
   // Regression: round-7 scenario testing showed POST /config with a
   // 100KB inboxPath was accepted and persisted to disk, ballooning
   // config.json to 100KB and breaking downstream fs.watch / OS path
