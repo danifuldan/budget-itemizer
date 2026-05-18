@@ -50,6 +50,12 @@ export interface AppState {
   streamStatus: string;
   streamDone: boolean;
   selectedAccount: string;
+  /** True when selectedAccount was auto-filled as a placeholder (first
+   *  account) because no real default was known yet. A later real
+   *  default id corrects a provisional pick; a user pick clears it and
+   *  is never overridden. Fixes the post-upgrade ordering where
+   *  ynabAccountId is persisted asynchronously after /accounts resolves. */
+  accountIsProvisional: boolean;
   importing: boolean;
   error: string | null;
   lastFile: File | null;
@@ -103,6 +109,7 @@ export const initialState: AppState = {
   streamStatus: "",
   streamDone: false,
   selectedAccount: "",
+  accountIsProvisional: false,
   importing: false,
   error: null,
   lastFile: null,
@@ -216,9 +223,15 @@ export function reducer(state: AppState, action: AppAction): AppState {
         ),
       };
     case "UPDATE_FIELD":
-      return { ...state, [action.field]: action.value };
+      return {
+        ...state,
+        [action.field]: action.value,
+        // A manual selectedAccount edit is a real choice, not a placeholder.
+        ...(action.field === "selectedAccount" ? { accountIsProvisional: false } : {}),
+      };
     case "SET_ACCOUNT":
-      return { ...state, selectedAccount: action.account };
+      // The user committed a choice — never auto-override it afterwards.
+      return { ...state, selectedAccount: action.account, accountIsProvisional: false };
     case "START_IMPORT":
       return { ...state, importing: true };
     case "IMPORT_SUCCESS":
@@ -291,23 +304,32 @@ export function reducer(state: AppState, action: AppAction): AppState {
         })),
         sourceFilename: action.filename,
         selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
       };
     }
     case "ACCOUNTS_LOADED": {
-      // No-op when the user already has an account selected, or when the
-      // accounts list is empty. Keeps the reducer idempotent so the small
-      // useEffect emitter can re-dispatch on every accounts identity change
-      // (useRetryableFetch returns a fresh array each poll) without effect.
-      if (state.selectedAccount) return state;
       if (action.accounts.length === 0) return state;
-      // Prefer the configured default-account *id* when it still resolves
-      // to a real account; a stale/empty id (rename the migration could
-      // not reconcile, or deleted account) falls back to the first
-      // account's id — never persist or select an id that doesn't exist.
-      const preferred = action.defaultAccountId && action.accounts.some((a) => a.id === action.defaultAccountId)
-        ? action.defaultAccountId
-        : action.accounts[0].id;
-      return { ...state, selectedAccount: preferred };
+      const resolvedId =
+        action.defaultAccountId && action.accounts.some((a) => a.id === action.defaultAccountId)
+          ? action.defaultAccountId
+          : null;
+      // A committed selection (user pick, or a previously-resolved real
+      // default) is never overridden — keeps re-dispatches on every poll
+      // (useRetryableFetch returns a fresh array each time) idempotent.
+      if (state.selectedAccount && !state.accountIsProvisional) return state;
+      // The real default is known now: commit it. This also CORRECTS a
+      // provisional first-account pick made on an earlier emit when
+      // ynabAccountId hadn't been persisted yet (post-upgrade ordering).
+      if (resolvedId) {
+        return { ...state, selectedAccount: resolvedId, accountIsProvisional: false };
+      }
+      // No default yet and nothing chosen — provisionally show the first
+      // account so the picker isn't empty; a later real default (above)
+      // corrects it, a user pick (SET_ACCOUNT) supersedes it.
+      if (!state.selectedAccount) {
+        return { ...state, selectedAccount: action.accounts[0].id, accountIsProvisional: true };
+      }
+      return state; // keep the existing provisional pick
     }
     case "APPLY_PARSE_PROGRESS_EVENT": {
       const { event } = action;
@@ -332,6 +354,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
         view: "review",
         sourceFilename: action.filename,
         selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
       };
       return action.events.reduce(
         (acc, event) => applyParseProgressEvent(acc, event),

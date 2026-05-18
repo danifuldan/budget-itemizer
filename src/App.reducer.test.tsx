@@ -135,6 +135,28 @@ describe("reducer STREAM_DONE", () => {
     expect(s.selectedAccount).toBe("acc-1");
   });
 
+  // Premortem Bug 1: on first post-upgrade launch /accounts resolves
+  // before the async startup migration persists ynabAccountId, so the
+  // emitter fires with defaultAccountId:"" FIRST (→ provisional first
+  // account), then again with the real id. The real id must correct the
+  // provisional pick, not be swallowed by idempotency.
+  it("ACCOUNTS_LOADED corrects a provisional first-account pick when the real default id arrives later", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "" } as AppAction,
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-2" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("acc-2");
+  });
+
+  it("ACCOUNTS_LOADED never overrides an explicit user pick even after a real default id arrives", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "" } as AppAction,
+      { type: "SET_ACCOUNT", account: "acc-1" }, // user deliberately picks acc-1
+      { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-2" } as AppAction,
+    ]);
+    expect(s.selectedAccount).toBe("acc-1");
+  });
+
   it("ACCOUNTS_LOADED is idempotent — never overrides an account the user already picked", () => {
     const s = fold([
       { type: "ACCOUNTS_LOADED", accounts: accts, defaultAccountId: "acc-1" } as AppAction,

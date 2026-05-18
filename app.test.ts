@@ -180,6 +180,28 @@ describe("Hono app integration", () => {
     expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
   });
 
+  // Premortem Bug 2: on first post-upgrade launch hiddenAccounts still
+  // holds NAMES (the async startup migration hasn't reconciled them yet).
+  // The filter must keep them hidden until migration lands — otherwise
+  // previously-hidden accounts reappear in the dropdown.
+  it("GET /accounts also hides accounts whose NAME is in (un-migrated) hiddenAccounts", async () => {
+    vi.mocked(getAllAccounts).mockResolvedValue([
+      { id: "acc-1", name: "Checking" },
+      { id: "acc-2", name: "Bank of America" },
+    ] as any);
+    vi.mocked(getConfig).mockReturnValue({
+      hiddenAccounts: ["Bank of America"], // a NAME, not an id
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    const res = await app.request("/accounts", {
+      headers: { Authorization: authHeader },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
+  });
+
   it("POST /import with valid body returns success", async () => {
     vi.mocked(importReceiptToYnab).mockResolvedValue(undefined);
     const res = await app.request("/import", {
