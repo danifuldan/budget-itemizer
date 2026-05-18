@@ -24,7 +24,19 @@ let starting = false;
 // or health-check fails. Cleared on the next successful start.
 let lastStartError: string | null = null;
 
-const PORT_BASE = 8921;
+/** Production default is 8921. Overridable via env ONLY so the smoke
+ *  runners can use a distinct port range and never reclaim (kill) the
+ *  user's running app's llama-server. Junk / out-of-range → default,
+ *  so a bad value can never produce an unbindable port. */
+export function resolveLlamaPortBase(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.BUDGET_ITEMIZER_LLAMA_PORT_BASE;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n < 65535 ? n : 8921;
+}
+
+const PORT_BASE = resolveLlamaPortBase();
 
 // ── Shared helpers ─────────────────────────────────────────────────
 

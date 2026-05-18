@@ -377,6 +377,10 @@ async function main() {
       APP_API_KEY: SMOKE_API_KEY,
       APP_API_SECRET: SMOKE_API_SECRET,
       BUDGET_ITEMIZER_NO_KEYCHAIN: "1",
+      // Distinct llama-server port range (8931–8940) so this smoke
+      // sidecar never reclaims/kills the user's running app's
+      // llama-server on the default 8921–8930.
+      BUDGET_ITEMIZER_LLAMA_PORT_BASE: "8931",
       // The sidecar's category fetch needs the YNAB token; supply via env
       // since we're running with NO_KEYCHAIN.
       YNAB_API_KEY: ynabToken,

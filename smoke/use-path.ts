@@ -299,6 +299,10 @@ async function main() {
       APP_API_KEY: "smoke-test-user",
       APP_API_SECRET: "smoke-test-pass",
       BUDGET_ITEMIZER_NO_KEYCHAIN: "1",
+      // Distinct llama-server port range (8931–8940) so this smoke
+      // sidecar never reclaims/kills the user's running app's
+      // llama-server on the default 8921–8930.
+      BUDGET_ITEMIZER_LLAMA_PORT_BASE: "8931",
     }),
     stdio: ["ignore", "pipe", "pipe"],
   }) as ChildProcessWithoutNullStreams;
