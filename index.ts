@@ -2,7 +2,9 @@ import { serve } from "@hono/node-server";
 import * as net from "net";
 import env from "./utils/env-vars";
 import { startWatcher, revalidatePendingCategories } from "./services/watcher";
-import { loadConfig, getConfig, isSetupComplete } from "./services/config";
+import { loadConfig, getConfig, saveConfig, isSetupComplete } from "./services/config";
+import { runStartupAccountMigration } from "./services/account-identity";
+import { getAllAccounts } from "./services/budget";
 import { getModelPath } from "./services/model-manager";
 import { startLlamaServer, stopAll as stopAllLlamaServers } from "./services/llama-server";
 import { setCategoriesReconnectCallback } from "./services/budget-ynab";
@@ -122,6 +124,16 @@ async function main() {
       } else {
         console.log("Setup incomplete — watcher not started. Configure via /setup endpoints.");
       }
+
+      // Non-blocking: reconcile account identity from the mutable display
+      // NAME to the stable YNAB id. Runs AFTER serve binds so it never
+      // delays boot; steady-state (id already resolved, no name-keyed
+      // hidden entries) early-returns without a YNAB call.
+      void runStartupAccountMigration({
+        getConfig: () => getConfig(),
+        resolveAccounts: getAllAccounts,
+        persist: (u) => { void saveConfig(u); },
+      });
     }
   );
 }

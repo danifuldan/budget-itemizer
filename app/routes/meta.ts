@@ -29,7 +29,7 @@ meta.get("/accounts", auth, async (c) => {
     if (showAll) return c.json(all, 200);
     const hidden = getConfig().hiddenAccounts;
     const filtered = hidden.length > 0
-      ? all.filter((a) => !hidden.includes(a))
+      ? all.filter((a) => !hidden.includes(a.id))
       : all;
     return c.json(filtered, 200);
   } catch (err: any) {

@@ -79,3 +79,21 @@ export async function migrateAccountIdentity(
 
   return { ynabAccountId: nextId, hiddenAccounts: nextHidden };
 }
+
+export interface StartupMigrationDeps {
+  getConfig: () => MigratableConfig;
+  resolveAccounts: () => Promise<AccountRef[]>;
+  persist: (u: { ynabAccountId?: string; hiddenAccounts?: string[] }) => Promise<void> | void;
+}
+
+// index.ts calls this non-blocking AFTER the HTTP server binds, so it
+// must never reject (a thrown error here would surface as an unhandled
+// rejection at boot). migrateAccountIdentity is already designed not to
+// throw; the outer guard is belt-and-suspenders against future drift.
+export async function runStartupAccountMigration(deps: StartupMigrationDeps): Promise<void> {
+  try {
+    await migrateAccountIdentity(deps.getConfig(), deps.resolveAccounts, deps.persist);
+  } catch {
+    // best-effort: a failed migration just retries next launch
+  }
+}
