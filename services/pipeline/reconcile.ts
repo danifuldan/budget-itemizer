@@ -255,6 +255,31 @@ export const reconcileExtraction = (
     }
   }
 
+  // Gross total + separate refund. An order invoice's stated total
+  // (e.g. Amazon "Grand Total") is the amount CHARGED; a "Refund Total"
+  // shown alongside it is a SEPARATE later credit, not a reduction of
+  // that total. Subtracting it makes a correct extraction fail to
+  // reconcile. If — and only if — adding the refund back is exactly
+  // what makes the total reconcile, the stated total is gross: keep the
+  // gross transaction (it matches the bank charge — matching is the
+  // whole point) and drop the refund so it isn't deducted or emitted as
+  // a -refund split. The net-stated case already reconciles WITH the
+  // refund, so this branch never fires there.
+  const curRefund = receipt.refund ?? 0;
+  if (
+    total > 0 &&
+    totalDiff > 0.10 &&
+    curRefund > 0 &&
+    Math.abs(expectedTotal + curRefund - total) <= 0.10
+  ) {
+    console.log(
+      `  Validation: stated total $${total.toFixed(2)} is gross; "Refund" $${curRefund.toFixed(2)} is a separate credit — not deducting (import matches the charge)`,
+    );
+    receipt.refund = 0;
+    expectedTotal += curRefund;
+    totalDiff = Math.abs(expectedTotal - total);
+  }
+
   if (total > 0 && totalDiff > 0.10) {
     console.warn(`  Validation: computed total ($${expectedTotal.toFixed(2)}) differs from extracted total ($${total.toFixed(2)}) by $${totalDiff.toFixed(2)}`);
   }

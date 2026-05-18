@@ -128,4 +128,70 @@ describe("reconcileExtraction", () => {
     expect(receipt.lineItems![1].quantity).toBe(2);
     expect(receipt.lineItems![1].lineItemTotalAmount).toBe(20);
   });
+
+  // #91: Amazon "Grand Total" is the GROSS charge; a "Refund Total"
+  // shown alongside it is a SEPARATE later credit, not a reduction of
+  // that total. Import the gross (it matches the bank charge — we're in
+  // the business of matching transactions). The refund must NOT be
+  // deducted and must not survive as a -refund split.
+  it("treats a gross total + separate refund as gross (refund zeroed, reconciles)", () => {
+    const warnSpy = vi.spyOn(console, "warn");
+    const receipt = {
+      merchant: "Amazon",
+      transactionDate: "2025-12-09",
+      memo: "",
+      totalAmount: 91.52, // Grand Total = items 84.35 + tax 7.17
+      category: "",
+      lineItems: [
+        { productName: "Book A", quantity: 1, lineItemTotalAmount: 24.02, category: "" },
+        { productName: "Book B", quantity: 1, lineItemTotalAmount: 14.75, category: "" },
+        { productName: "Encasement", quantity: 2, lineItemTotalAmount: 45.58, category: "" },
+      ],
+      tax: 7.17,
+      shipping: 0,
+      discount: 0,
+      refund: 16.0, // "Refund Total $16.00" — a separate later credit
+    };
+    const labels: LabelResult = {
+      merchant: "Amazon",
+      dateLabel: "",
+      totalLabel: "Grand Total",
+      summaryLabels: [],
+      lineItems: [],
+    };
+    reconcileExtraction(receipt, labels, "Grand Total $91.52\nRefund Total $16.00", []);
+    expect(receipt.refund).toBe(0);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("differs from extracted total"),
+    );
+  });
+
+  // The other side of the disagreement: when the stated total IS
+  // already net of the refund (reconciles WITH it deducted), the refund
+  // is real and must be preserved — gross-detection must not fire.
+  it("keeps a refund that the stated total is already net of", () => {
+    const receipt = {
+      merchant: "Shop",
+      transactionDate: "2024-01-01",
+      memo: "",
+      totalAmount: 40, // already net: items 50 - refund 10
+      category: "",
+      lineItems: [
+        { productName: "Thing", quantity: 1, lineItemTotalAmount: 50, category: "" },
+      ],
+      tax: 0,
+      shipping: 0,
+      discount: 0,
+      refund: 10,
+    };
+    const labels: LabelResult = {
+      merchant: "Shop",
+      dateLabel: "",
+      totalLabel: "Total",
+      summaryLabels: [],
+      lineItems: [],
+    };
+    reconcileExtraction(receipt, labels, "Total $40.00", []);
+    expect(receipt.refund).toBe(10);
+  });
 });
