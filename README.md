@@ -63,7 +63,7 @@ Budget Itemizer is in public beta. Apple Developer Program membership costs $99/
 
 #### What receipts work?
 
-Tested formats: order invoices from Amazon, Walmart, Costco, Kroger, Target. These are typically downloaded as PDFs from your order history (press Cmd+p while viewing the invoice page and save as PDF). Register tape photos, scanned paper receipts, and email-only receipts aren't the target, although they might work (Costco's downloaded receipts already look like this). Your mileage will vary.
+Tested formats: order invoices from Amazon, Walmart, Costco, Kroger, and Target. These are typically downloaded as PDFs from your order history (press Cmd+p while viewing the invoice page and save as PDF). Register tape photos, scanned paper receipts, and email-only receipts aren't the target, although they might work (Costco's downloaded receipts already look like this). Your mileage will vary.
 
 #### Why is the model so big?
 
