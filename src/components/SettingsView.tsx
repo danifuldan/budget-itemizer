@@ -37,7 +37,7 @@ interface SettingsViewProps {
  *  manual "Check now" failures DO surface so the user knows the click
  *  did something. */
 function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }) {
-  const { available, checking, installing, error, check, installAndRestart } = appUpdate;
+  const { available, checking, installing, error, lastCheck, check, installAndRestart } = appUpdate;
   if (available) {
     return (
       <div className="settings-update-row">
@@ -50,14 +50,25 @@ function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }
       </div>
     );
   }
-  // useAppUpdate already maps known error classes to user-facing strings
-  // (e.g., "Couldn't reach update server") and treats 404 / no-manifest as
-  // the up-to-date case (no error set), so we just render whatever it gave us.
-  const status = error
-    ? error
-    : checking
-    ? "Checking for updates…"
-    : "Up to date";
+  // Truthful status: a check that FAILED is never shown as "Up to date".
+  // Each outcome is distinct and time-stamped so a broken updater is
+  // visible (and diagnosable) instead of masquerading as success.
+  const ago = (at: number): string => {
+    const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+    if (s < 60) return "just now";
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+  };
+  let status: string;
+  if (error) status = error;
+  else if (checking) status = "Checking for updates…";
+  else if (!lastCheck) status = "Not checked yet";
+  else if (lastCheck.outcome === "up-to-date") status = `Up to date (checked ${ago(lastCheck.at)})`;
+  else if (lastCheck.outcome === "no-manifest") status = `No newer release published (checked ${ago(lastCheck.at)})`;
+  else if (lastCheck.outcome === "unreachable") status = `Couldn't reach update server (last tried ${ago(lastCheck.at)})`;
+  else status = `Update check failed (last tried ${ago(lastCheck.at)})`;
   return (
     <div className="settings-update-row">
       <span className="settings-update-text">{status}</span>
