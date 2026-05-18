@@ -605,14 +605,17 @@ export class YnabBudgetProvider implements BudgetProvider {
     const fixedTotalAmount = Math.round(-totalAmount * 1000);
     // Deterministic YNAB import_id (≤36 chars). On an ack-lost retry of
     // the SAME receipt, /import re-creates with the same import_id and
-    // YNAB's native bank-import dedupe rejects the duplicate (F2). Two
-    // genuinely-distinct receipts with identical merchant+date+amount
-    // would collide — same trade-off banks/YNAB make on real imports;
-    // far rarer and far less harmful than a duplicate transaction.
+    // YNAB's native bank-import dedupe rejects the duplicate (F2).
+    // Account-scoped: YNAB's import_id uniqueness is per-account, and
+    // scoping by account also means a legitimate re-file of the same
+    // receipt to a DIFFERENT account is NOT silently swallowed. (Two
+    // genuinely-distinct receipts with identical account+merchant+date
+    // +amount still collide — same trade-off banks/YNAB make on real
+    // imports; rare and far less harmful than a duplicate transaction.)
     const importId =
       "BI:" +
       createHash("sha256")
-        .update(`${merchant}|${transactionDate}|${fixedTotalAmount}`)
+        .update(`${accountName}|${merchant}|${transactionDate}|${fixedTotalAmount}`)
         .digest("hex")
         .slice(0, 33);
     const fixedSplits = splits?.map((split) => ({

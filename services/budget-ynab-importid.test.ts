@@ -25,7 +25,7 @@ import { YnabBudgetProvider } from "./budget-ynab";
 const budget = {
   data: {
     budget: {
-      accounts: [{ id: "acc1", name: "Checking" }],
+      accounts: [{ id: "acc1", name: "Checking" }, { id: "acc2", name: "Savings" }],
       categories: [{ id: "cat1", name: "Groceries", category_group_id: "g1" }],
       category_groups: [{ id: "g1", name: "Living" }],
     },
@@ -38,9 +38,9 @@ describe("YNAB createTransaction sends a deterministic import_id (F2)", () => {
     getBudgetById.mockReset().mockResolvedValue(budget);
   });
 
-  async function create(total: number, date = "2026-05-10", merchant = "Amazon") {
+  async function create(total: number, date = "2026-05-10", merchant = "Amazon", account = "Checking") {
     const p = new YnabBudgetProvider();
-    await p.createTransaction("Checking", merchant, "Groceries", date, "memo", total);
+    await p.createTransaction(account, merchant, "Groceries", date, "memo", total);
     return createTransaction.mock.calls.at(-1)![1].transaction.import_id as string;
   }
 
@@ -56,5 +56,11 @@ describe("YNAB createTransaction sends a deterministic import_id (F2)", () => {
     const b = await create(99.99); // a genuinely different receipt
     expect(a2).toBe(a1);
     expect(b).not.toBe(a1);
+  });
+
+  it("is account-scoped: the same receipt re-filed to a different account is NOT deduped away", async () => {
+    const checking = await create(12.34, "2026-05-10", "Amazon", "Checking");
+    const savings = await create(12.34, "2026-05-10", "Amazon", "Savings");
+    expect(savings).not.toBe(checking);
   });
 });
