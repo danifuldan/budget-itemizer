@@ -32,6 +32,13 @@ export interface ReceiptLineItem {
   category: string;
 }
 
+/** An account's stable id plus its current display name. Identity is the
+ *  id — a provider-side rename changes `name`, never `id`. */
+export interface AccountRef {
+  id: string;
+  name: string;
+}
+
 export interface ImportRecord {
   id: string;
   filename: string;

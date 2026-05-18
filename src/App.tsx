@@ -1,9 +1,10 @@
 import { useReducer, useEffect, useCallback, useState, useRef } from "react";
 import { apiPost, initFailure, uploadToInbox } from "./api/client";
-import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportRecord } from "./api/types";
+import type { ReceiptLineItem, SSEHeader, SSEItem, SSETotal, Receipt, ImportRecord, AccountRef } from "./api/types";
 import { useHistory } from "./hooks/useHistory";
 import { useStatus } from "./hooks/useStatus";
 import { useAccounts } from "./hooks/useAccounts";
+import { useFocusRefresh } from "./hooks/useFocusRefresh";
 import { useCategories } from "./hooks/useCategories";
 import { useReceiptStream } from "./hooks/useReceiptStream";
 import DropZone from "./components/DropZone";
@@ -49,6 +50,12 @@ export interface AppState {
   streamStatus: string;
   streamDone: boolean;
   selectedAccount: string;
+  /** True when selectedAccount was auto-filled as a placeholder (first
+   *  account) because no real default was known yet. A later real
+   *  default id corrects a provisional pick; a user pick clears it and
+   *  is never overridden. Fixes the post-upgrade ordering where
+   *  ynabAccountId is persisted asynchronously after /accounts resolves. */
+  accountIsProvisional: boolean;
   importing: boolean;
   error: string | null;
   lastFile: File | null;
@@ -82,7 +89,7 @@ export type AppAction =
   | { type: "SET_SOURCE_FILE"; filename: string }
   | { type: "LOAD_RECEIPT"; receipt: Receipt; sourceFilename: string }
   | { type: "RECEIPT_READY_FOR_PENDING"; filename: string; receipt: Receipt }
-  | { type: "ACCOUNTS_LOADED"; accounts: string[]; defaultAccount: string }
+  | { type: "ACCOUNTS_LOADED"; accounts: AccountRef[]; defaultAccountId: string }
   | { type: "APPLY_PARSE_PROGRESS_EVENT"; event: ParseProgressEvent }
   | { type: "LOAD_BUFFERED_PROGRESS"; filename: string; events: ParseProgressEvent[] };
 
@@ -102,6 +109,7 @@ export const initialState: AppState = {
   streamStatus: "",
   streamDone: false,
   selectedAccount: "",
+  accountIsProvisional: false,
   importing: false,
   error: null,
   lastFile: null,
@@ -215,9 +223,15 @@ export function reducer(state: AppState, action: AppAction): AppState {
         ),
       };
     case "UPDATE_FIELD":
-      return { ...state, [action.field]: action.value };
+      return {
+        ...state,
+        [action.field]: action.value,
+        // A manual selectedAccount edit is a real choice, not a placeholder.
+        ...(action.field === "selectedAccount" ? { accountIsProvisional: false } : {}),
+      };
     case "SET_ACCOUNT":
-      return { ...state, selectedAccount: action.account };
+      // The user committed a choice — never auto-override it afterwards.
+      return { ...state, selectedAccount: action.account, accountIsProvisional: false };
     case "START_IMPORT":
       return { ...state, importing: true };
     case "IMPORT_SUCCESS":
@@ -290,19 +304,32 @@ export function reducer(state: AppState, action: AppAction): AppState {
         })),
         sourceFilename: action.filename,
         selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
       };
     }
     case "ACCOUNTS_LOADED": {
-      // No-op when the user already has an account selected, or when the
-      // accounts list is empty. Keeps the reducer idempotent so the small
-      // useEffect emitter can re-dispatch on every accounts identity change
-      // (useRetryableFetch returns a fresh array each poll) without effect.
-      if (state.selectedAccount) return state;
       if (action.accounts.length === 0) return state;
-      const preferred = action.defaultAccount && action.accounts.includes(action.defaultAccount)
-        ? action.defaultAccount
-        : action.accounts[0];
-      return { ...state, selectedAccount: preferred };
+      const resolvedId =
+        action.defaultAccountId && action.accounts.some((a) => a.id === action.defaultAccountId)
+          ? action.defaultAccountId
+          : null;
+      // A committed selection (user pick, or a previously-resolved real
+      // default) is never overridden — keeps re-dispatches on every poll
+      // (useRetryableFetch returns a fresh array each time) idempotent.
+      if (state.selectedAccount && !state.accountIsProvisional) return state;
+      // The real default is known now: commit it. This also CORRECTS a
+      // provisional first-account pick made on an earlier emit when
+      // ynabAccountId hadn't been persisted yet (post-upgrade ordering).
+      if (resolvedId) {
+        return { ...state, selectedAccount: resolvedId, accountIsProvisional: false };
+      }
+      // No default yet and nothing chosen — provisionally show the first
+      // account so the picker isn't empty; a later real default (above)
+      // corrects it, a user pick (SET_ACCOUNT) supersedes it.
+      if (!state.selectedAccount) {
+        return { ...state, selectedAccount: action.accounts[0].id, accountIsProvisional: true };
+      }
+      return state; // keep the existing provisional pick
     }
     case "APPLY_PARSE_PROGRESS_EVENT": {
       const { event } = action;
@@ -327,6 +354,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
         view: "review",
         sourceFilename: action.filename,
         selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
       };
       return action.events.reduce(
         (acc, event) => applyParseProgressEvent(acc, event),
@@ -402,7 +430,11 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
-  const accounts = useAccounts(status.setupComplete);
+  const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
+  // Resync the account list when the user comes back to the app, so a
+  // YNAB-side rename shows up without waiting for the next poll. The 60s
+  // server cache bounds the API cost; 30s throttle bounds the trigger.
+  useFocusRefresh(refreshAccounts, 30_000);
   const categories = useCategories(status.setupComplete);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
@@ -462,8 +494,8 @@ export default function App() {
   // so this effect just hands it the inputs. useRetryableFetch returns a
   // fresh array each poll — re-dispatches are no-ops by reducer design.
   useEffect(() => {
-    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccount: appConfig.defaultAccount });
-  }, [accounts, appConfig.defaultAccount]);
+    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccountId: appConfig.ynabAccountId });
+  }, [accounts, appConfig.ynabAccountId]);
 
   const handleFile = (file: File) => {
     // If the LLM is still warming up, don't enter the review flow — the
@@ -546,7 +578,7 @@ export default function App() {
   const handleQuickImport = async (filename: string) => {
     const pending = pendingFiles.find((f) => f.filename === filename);
     if (!pending?.receipt) return;
-    const account = state.selectedAccount || accounts[0];
+    const account = state.selectedAccount || accounts[0]?.id;
     if (!account) return;
     setImportingFile(filename);
     try {
@@ -760,6 +792,7 @@ export default function App() {
           accounts={accounts}
           selectedAccount={state.selectedAccount}
           onAccountChange={(a) => dispatch({ type: "SET_ACCOUNT", account: a })}
+          onOpen={refreshAccounts}
           onDiscard={state.sourceFilename ? () => {
             handleSkipPending(state.sourceFilename!);
             abort();

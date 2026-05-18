@@ -122,6 +122,8 @@ async function ynabFetch<T>(token: string, route: string, init?: RequestInit): P
 interface YnabTransaction {
   id: string;
   memo: string | null;
+  import_id?: string | null;
+  deleted?: boolean;
 }
 
 async function listTransactionsSince(token: string, budgetId: string, sinceDate: string): Promise<YnabTransaction[]> {
@@ -130,6 +132,15 @@ async function listTransactionsSince(token: string, budgetId: string, sinceDate:
     `/budgets/${budgetId}/transactions?since_date=${sinceDate}`,
   );
   return body.data.transactions;
+}
+
+// Full history (no date window). The memo-marker teardown was unreliable:
+// YNAB (correctly) blanks the PARENT memo on split transactions, so a
+// multi-item create never carries the marker. The robust signal is a
+// snapshot diff — anything present after the run but not before was
+// created BY the run, regardless of memo or receipt date.
+async function listAllTransactions(token: string, budgetId: string): Promise<YnabTransaction[]> {
+  return listTransactionsSince(token, budgetId, "2000-01-01");
 }
 
 function isoNDaysAgo(n: number): string {
@@ -273,6 +284,51 @@ async function parseReceipt(port: number, pdfPath: string): Promise<ReceiptShape
   return receipt;
 }
 
+interface AccountRefShape { id: string; name: string }
+
+// Resolve the account *id* the same way the app now does: account
+// identity is the stable id, not the mutable display name. This also
+// makes Tier B the gold test for the renamed-account path — when
+// config.defaultAccount no longer matches any live account name (a YNAB
+// rename), we fall back to the sole account, exactly as the reducer's
+// provisional pick does for a single-account budget.
+async function resolveAccountId(
+  port: number,
+  cfg: { ynabAccountId?: string; defaultAccount?: string },
+): Promise<AccountRefShape> {
+  const res = await fetch(`http://127.0.0.1:${port}/accounts`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) throw new Error(`/accounts → ${res.status}: ${await res.text()}`);
+  const accounts = (await res.json()) as AccountRefShape[];
+  if (accounts.length === 0) throw new Error("/accounts returned no accounts");
+
+  const byId = cfg.ynabAccountId && accounts.find((a) => a.id === cfg.ynabAccountId);
+  if (byId) return byId;
+  const byName = cfg.defaultAccount && accounts.find((a) => a.name === cfg.defaultAccount);
+  if (byName) return byName;
+  if (accounts.length === 1) return accounts[0]; // rename: name no longer resolves
+  throw new Error(
+    `Cannot resolve a target account: config has no ynabAccountId, defaultAccount ` +
+    `${JSON.stringify(cfg.defaultAccount)} matches no live account, and the budget ` +
+    `has ${accounts.length} accounts. Re-select the account in Settings.`,
+  );
+}
+
+// The server saves the upload under sanitizeReceiptFilename(file.name)
+// and keys the pending/claim entry by THAT name — not the raw basename.
+// The real FE learns the registered name from the pending list; mirror
+// that here (snapshot before/after parse) so /import's claim matches.
+// Reimplementing the sanitizer here would just drift from it.
+async function pendingFilenames(port: number): Promise<Set<string>> {
+  const res = await fetch(`http://127.0.0.1:${port}/watcher/pending`, {
+    headers: { Authorization: authHeader() },
+  });
+  if (!res.ok) return new Set();
+  const list = (await res.json()) as Array<{ filename: string }>;
+  return new Set(list.map((p) => p.filename));
+}
+
 async function importReceipt(port: number, account: string, receipt: ReceiptShape, sourceFilename: string, marker: string): Promise<void> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), IMPORT_TIMEOUT_MS);
@@ -346,11 +402,12 @@ async function main() {
     fs.readFileSync(path.join(REAL_CONFIG_DIR, "config.json"), "utf8"),
   );
   const budgetId: string = realConfig.ynabBudgetId;
-  const account: string = realConfig.defaultAccount;
-  if (!budgetId || !account) {
-    console.error("config.ynabBudgetId or config.defaultAccount is empty. Finish setup wizard first.");
+  if (!budgetId) {
+    console.error("config.ynabBudgetId is empty. Finish setup wizard first.");
     process.exit(1);
   }
+  // The account id is resolved from the live /accounts list AFTER boot
+  // (it reflects YNAB renames); config alone can be stale.
   const ynabToken = await getKeychainSecret("ynab-api-key");
 
   // Tag every smoke-imported transaction with a unique marker. Teardown
@@ -359,14 +416,43 @@ async function main() {
   // that modify an existing tx instead of creating one. The runId is
   // long enough that a collision with a real memo would be deliberate.
   const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  // Marker still goes in the memo (useful for manual spotting), but
+  // teardown no longer relies on it — snapshot diff is authoritative.
   const marker = `[SMOKE ${runId}]`;
-  // Look back 30 days for matching transactions — receipts dated last
-  // week create YNAB transactions dated last week, not today.
-  const sinceDate = isoNDaysAgo(30);
 
-  console.log(`Budget: ${budgetId}  Account: ${account}`);
+  console.log(`Budget: ${budgetId}`);
   console.log(`Fixtures: ${fixtures.length} from ${fixturesDir}`);
-  console.log(`Smoke marker: ${marker} (teardown deletes any tx whose memo starts with this)\n`);
+  console.log(`Smoke marker: ${marker}\n`);
+
+  // Bed prep: clear prior-run smoke artifacts so this run genuinely
+  // CREATES (otherwise findMatchingTransaction matches a leftover and
+  // updates in place — nothing to verify-then-delete). Every app-created
+  // transaction carries a deterministic "BI:" import_id; the user's
+  // manual Test Budget scaffolding has import_id=null and is never
+  // touched. This is the dedicated smoke budget.
+  const preRun = await listAllTransactions(ynabToken, budgetId);
+  const priorArtifacts = preRun.filter(
+    (t) => !t.deleted && typeof t.import_id === "string" && t.import_id.startsWith("BI:"),
+  );
+  if (priorArtifacts.length > 0) {
+    console.log(`Clearing ${priorArtifacts.length} prior smoke artifact(s) (BI: import_id) for a clean bed...`);
+    for (const t of priorArtifacts) {
+      try {
+        await deleteTransaction(ynabToken, budgetId, t.id);
+      } catch (err) {
+        console.log(`  ✗ could not clear ${t.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  // Snapshot AFTER the bed clear: any non-deleted id present after the
+  // run but absent here was created BY the run — the reliable teardown
+  // signal (memo markers don't survive YNAB's split-parent-memo rule).
+  const afterClear = await listAllTransactions(ynabToken, budgetId);
+  const beforeIds = new Set(
+    afterClear.filter((t) => !t.deleted).map((t) => t.id),
+  );
+  console.log(`Pre-run snapshot: ${beforeIds.size} existing transaction(s) (left untouched).\n`);
 
   const { home: smokeHome, cleanup: cleanupHome } = createIsolatedHome();
 
@@ -395,15 +481,31 @@ async function main() {
     const port = await waitForBootHandshake(child);
     console.log(`Sidecar listening on ${port}. Waiting for llmReady...`);
     await waitForLlmReady(port);
-    console.log("LLM ready.\n");
+    console.log("LLM ready.");
+
+    const target = await resolveAccountId(port, {
+      ynabAccountId: realConfig.ynabAccountId,
+      defaultAccount: realConfig.defaultAccount,
+    });
+    const account = target.id;
+    console.log(
+      `Account: ${target.name} (id ${account})` +
+      (realConfig.defaultAccount && realConfig.defaultAccount !== target.name
+        ? ` — config.defaultAccount=${JSON.stringify(realConfig.defaultAccount)} no longer matches (rename); resolved via /accounts`
+        : ""),
+    );
+    console.log();
 
     for (const pdfPath of fixtures) {
       const filename = path.basename(pdfPath);
       console.log(`→ ${filename}`);
       const t0 = Date.now();
       try {
+        const before = await pendingFilenames(port);
         const receipt = await parseReceipt(port, pdfPath);
-        await importReceipt(port, account, receipt, filename, marker);
+        const after = await pendingFilenames(port);
+        const registered = [...after].find((n) => !before.has(n)) ?? filename;
+        await importReceipt(port, account, receipt, registered, marker);
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
         console.log(`  ✓ parsed + imported (${elapsed}s) — total $${receipt.totalAmount.toFixed(2)}, ${receipt.lineItems?.length ?? 0} items\n`);
         importedCount++;
@@ -421,16 +523,18 @@ async function main() {
     });
     cleanupHome();
 
-    // Teardown: query last 30 days, find transactions tagged with our
-    // marker (covers both newly-created and findMatchingTransaction-updated
-    // tx), delete each. Runs in finally{} so a half-failed run still cleans up.
-    console.log("\nTeardown: searching budget for marker...");
+    // Teardown by snapshot diff: anything non-deleted that exists now but
+    // wasn't in the pre-run snapshot was created by this run. Reliable
+    // regardless of receipt date or YNAB's split-parent-memo blanking.
+    // Runs in finally{} so a half-failed run still cleans up. Never
+    // touches a pre-existing id (the user's manual scaffolding is safe).
+    console.log("\nTeardown: diffing against pre-run snapshot...");
     try {
-      const allTx = await listTransactionsSince(ynabToken, budgetId, sinceDate);
-      const tagged = allTx.filter((t) => (t.memo ?? "").startsWith(marker));
-      console.log(`Found ${tagged.length} transaction(s) tagged ${marker}. Deleting...`);
+      const post = await listAllTransactions(ynabToken, budgetId);
+      const created = post.filter((t) => !t.deleted && !beforeIds.has(t.id));
+      console.log(`Found ${created.length} transaction(s) created by this run. Deleting...`);
       let deleteFailures = 0;
-      for (const t of tagged) {
+      for (const t of created) {
         try {
           await deleteTransaction(ynabToken, budgetId, t.id);
         } catch (err) {
@@ -439,13 +543,15 @@ async function main() {
         }
       }
       if (deleteFailures > 0) {
-        console.error(`\n${deleteFailures} transaction(s) could not be deleted automatically — search budget ${budgetId} for memos starting with ${marker}.`);
-      } else if (tagged.length > 0) {
-        console.log(`All ${tagged.length} smoke transactions deleted.`);
+        console.error(`\n${deleteFailures} transaction(s) could not be deleted automatically — search budget ${budgetId} for import_id starting with "BI:".`);
+      } else if (created.length > 0) {
+        console.log(`All ${created.length} run-created transactions deleted.`);
+      } else {
+        console.log("Nothing to delete (no transactions were created).");
       }
     } catch (err) {
       console.error(`Teardown failed: ${err instanceof Error ? err.message : String(err)}`);
-      console.error(`Search budget ${budgetId} manually for memos starting with ${marker}.`);
+      console.error(`Search budget ${budgetId} manually for import_id starting with "BI:".`);
     }
   }
 

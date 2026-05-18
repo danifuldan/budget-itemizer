@@ -7,6 +7,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
+import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { apiFetch, apiPost } from "../api/client";
 import Toggle from "./Toggle";
 import TitlebarRegion from "./TitlebarRegion";
@@ -105,8 +106,17 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     budgetIdField: budgetProvider === "ynab" ? "ynabBudgetId" : "actualSyncId",
     loadAllAccounts: true,
     initialSelectedBudgetId: savedBudgetId || "",
-    initialSelectedAccount: config.defaultAccount || "",
+    initialSelectedAccount: config.ynabAccountId || "",
   });
+
+  // Resync the Default Account + Account Visibility lists when the user
+  // returns to the app while Settings is open (the Visibility list has no
+  // dropdown-open hook to hang a refresh on). Throttled; only when a
+  // budget is selected. Landing on Settings is already covered by the
+  // mount effect's refreshAccounts().
+  useFocusRefresh(() => {
+    if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts();
+  }, 30_000);
 
   const ynabTest = useYnabTest({
     onTested: async (result) => {
@@ -208,7 +218,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       ? (config.actualSyncId || "")
       : (config.ynabBudgetId || "");
     budgetAccountLoader.setSelectedBudgetId(restoredBudgetId);
-    budgetAccountLoader.setSelectedAccount(config.defaultAccount || "");
+    budgetAccountLoader.setSelectedAccount(config.ynabAccountId || "");
     await apiPost("/config", { budgetProvider: provider });
   };
 
@@ -228,7 +238,14 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       actualSyncId: budgetProvider === "actual"
         ? budgetAccountLoader.state.selectedBudgetId
         : config.actualSyncId,
-      defaultAccount: budgetAccountLoader.state.selectedAccount,
+      // Identity is the id; the display name is persisted alongside so
+      // backend isSetupComplete() (name-keyed, so a rename doesn't
+      // relaunch the wizard) and config.json stay human-readable.
+      ynabAccountId: selectedAccountId,
+      defaultAccount:
+        (allAccounts.find((a) => a.id === selectedAccountId)
+          ?? accounts.find((a) => a.id === selectedAccountId))?.name
+        ?? config.defaultAccount,
       inboxPath,
       processedPath,
       deleteAfterImport,
@@ -275,7 +292,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
 
   const ynabBudgetId = budgetProvider === "ynab" ? budgetAccountLoader.state.selectedBudgetId : "";
   const actualSyncId = budgetProvider === "actual" ? budgetAccountLoader.state.selectedBudgetId : "";
-  const defaultAccount = budgetAccountLoader.state.selectedAccount;
+  const selectedAccountId = budgetAccountLoader.state.selectedAccount;
   const accounts = budgetAccountLoader.state.accounts;
   const allAccounts = budgetAccountLoader.state.allAccounts;
   const loadingAccounts = budgetAccountLoader.state.loadingAccounts;
@@ -457,14 +474,15 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
               <select
                 id="settings-default-account"
                 className="select"
-                value={defaultAccount}
+                value={selectedAccountId}
                 onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
+                onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
                 disabled={loadingAccounts}
               >
                 {loadingAccounts && <option value="">Loading accounts...</option>}
                 {!loadingAccounts && accounts.length === 0 && <option value="">No accounts found</option>}
                 {accounts.map((a) => (
-                  <option key={a} value={a}>{a}</option>
+                  <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
             </div>
@@ -481,16 +499,16 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
             Uncheck accounts to hide them from the import dropdown.
           </div>
           {allAccounts.map((acct) => {
-            const visible = !hiddenAccounts.includes(acct);
+            const visible = !hiddenAccounts.includes(acct.id);
             return (
-              <div className="toggle-row" key={acct}>
-                <div className="toggle-label">{acct}</div>
+              <div className="toggle-row" key={acct.id}>
+                <div className="toggle-label">{acct.name}</div>
                 <Toggle
                   on={visible}
-                  ariaLabel={`Show ${acct} in import dropdown`}
+                  ariaLabel={`Show ${acct.name} in import dropdown`}
                   onChange={(on) => {
                     setHiddenAccounts((prev) =>
-                      on ? prev.filter((a) => a !== acct) : [...prev, acct]
+                      on ? prev.filter((a) => a !== acct.id) : [...prev, acct.id]
                     );
                   }}
                 />

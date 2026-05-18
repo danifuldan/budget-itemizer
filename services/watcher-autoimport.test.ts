@@ -13,8 +13,14 @@ vi.mock("./receipt", async () => {
   const actual = await vi.importActual<typeof import("./receipt")>("./receipt");
   return { ...actual, importReceipt: (a: string, r: any) => importReceipt(a, r) };
 });
+// The disagreement: defaultAccount holds a now-stale display name while
+// ynabAccountId holds the stable id. Auto-import must submit to the id.
 vi.mock("./config", () => ({
-  getConfig: () => ({ defaultAccount: "Checking", processedPath: "/tmp/out" }),
+  getConfig: () => ({
+    defaultAccount: "Bank of America",
+    ynabAccountId: "acc-1",
+    processedPath: "/tmp/out",
+  }),
 }));
 const addRecord = vi.fn();
 vi.mock("./history", () => ({ addRecord: (...a: any[]) => addRecord(...a) }));
@@ -64,6 +70,17 @@ describe("autoImportParsed — claim-bracketed (F1)", () => {
 
     // Auto-import must NOT also submit — the manual path owns this receipt.
     expect(importReceipt).not.toHaveBeenCalled();
+  });
+
+  it("submits to the stable ynabAccountId, not the stale defaultAccount name", async () => {
+    addPending("id.pdf", "/tmp/id.pdf");
+    markPendingReady("id.pdf", fakeReceipt);
+
+    const entry = getPending("id.pdf")!;
+    await autoImportParsed(entry);
+
+    expect(importReceipt).toHaveBeenCalledTimes(1);
+    expect(importReceipt.mock.calls[0][0]).toBe("acc-1");
   });
 
   it("claims first so a concurrent manual import is rejected", async () => {

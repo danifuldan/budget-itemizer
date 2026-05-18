@@ -13,6 +13,7 @@ import {
   splitsSimilarity,
   type BudgetProvider,
   type ResolvedSplit,
+  type AccountRef,
 } from "./budget-provider";
 import { writeRestrictedFile, ensureRestrictedDir } from "../utils/restricted-file";
 
@@ -183,6 +184,15 @@ let _categoriesInFlight: { key: string; promise: Promise<string[]> } | null = nu
 const cacheKeyForCategories = (): string =>
   `${getBudgetId()}::${(getAllowedCategories() ?? []).join(",")}`;
 
+// Accounts cache: shorter TTL than categories (60s vs 5m) because the FE
+// refetches on picker-open / throttled focus specifically so a rename
+// surfaces fast — but the per-token quota is 200/hr, so a burst still
+// has to collapse to one call. Keyed by budget id; no disk stash /
+// circuit breaker (the list only matters while actively picking).
+const ACCOUNTS_TTL_MS = 60 * 1000;
+let _accountsCache: { key: string; value: AccountRef[]; expiresAt: number } | null = null;
+let _accountsInFlight: { key: string; promise: Promise<AccountRef[]> } | null = null;
+
 // Persistent fallback: the last successful category fetch is stashed to
 // disk so that transient YNAB outages (no internet, rate-limit lockout,
 // YNAB downtime) don't block parsing. Categories change rarely — a
@@ -231,6 +241,11 @@ export const _resetCategoriesCacheForTests = () => {
   _categoriesInFlight = null;
   _lastFetchUsedStash = false;
   _onReconnect = null;
+};
+
+export const _resetAccountsCacheForTests = () => {
+  _accountsCache = null;
+  _accountsInFlight = null;
 };
 
 // Like the full reset but preserves the "previous fetch used stash"
@@ -383,17 +398,36 @@ export class YnabBudgetProvider implements BudgetProvider {
     }
   }
 
-  async getAllAccounts(): Promise<string[]> {
-    const budget = await getBudgets().getBudgetById(getBudgetId()).catch(wrapYnabError);
-
-    const accounts = budget.data.budget.accounts
-      ?.filter((a) => !a.deleted && !a.closed)
-      .map((a) => a.name);
-
-    if (!accounts) {
-      throw new Error("No accounts found");
+  async getAllAccounts(): Promise<AccountRef[]> {
+    const key = getBudgetId();
+    const now = Date.now();
+    if (_accountsCache && _accountsCache.key === key && _accountsCache.expiresAt > now) {
+      return _accountsCache.value;
+    }
+    // Coalesce concurrent calls onto a single in-flight fetch.
+    if (_accountsInFlight && _accountsInFlight.key === key) {
+      return _accountsInFlight.promise;
     }
 
+    const fetchPromise = (async () => {
+      const budget = await getBudgets().getBudgetById(key).catch(wrapYnabError);
+      const accounts = budget.data.budget.accounts
+        ?.filter((a) => !a.deleted && !a.closed)
+        .map((a) => ({ id: a.id, name: a.name }));
+      if (!accounts) {
+        throw new Error("No accounts found");
+      }
+      return accounts;
+    })();
+    _accountsInFlight = {
+      key,
+      promise: fetchPromise.finally(() => {
+        if (_accountsInFlight && _accountsInFlight.key === key) _accountsInFlight = null;
+      }),
+    };
+
+    const accounts = await _accountsInFlight.promise;
+    _accountsCache = { key, value: accounts, expiresAt: Date.now() + ACCOUNTS_TTL_MS };
     return accounts;
   }
 
@@ -406,7 +440,7 @@ export class YnabBudgetProvider implements BudgetProvider {
   }
 
   async findMatchingTransaction(
-    accountName: string,
+    accountId: string,
     amount: number,
     date: string,
     merchant: string,
@@ -433,11 +467,9 @@ export class YnabBudgetProvider implements BudgetProvider {
       transactions = response.data.transactions;
     } else {
       const budget = await getBudgets().getBudgetById(budgetId).catch(wrapYnabError);
-      const accountId = budget.data.budget.accounts?.find(
-        (a) => a.name === accountName,
-      )?.id;
+      const exists = budget.data.budget.accounts?.some((a) => a.id === accountId);
 
-      if (!accountId) {
+      if (!exists) {
         throw new Error("Account not found");
       }
 
@@ -447,13 +479,13 @@ export class YnabBudgetProvider implements BudgetProvider {
       transactions = response.data.transactions;
     }
 
-    // Resolve the selected account ID for preferred matching
+    // Selected account id for preferred matching. Same control flow as
+    // before (only meaningful in the cross-account path; undefined
+    // otherwise), but it's now the stable param id directly rather than
+    // resolved from the mutable display name.
     let selectedAccountId: string | undefined;
     if (matchAcrossAccounts) {
-      const budget = await getBudgets().getBudgetById(budgetId).catch(wrapYnabError);
-      selectedAccountId = budget.data.budget.accounts?.find(
-        (a) => a.name === accountName,
-      )?.id;
+      selectedAccountId = accountId;
     }
 
     // Filter: exact amount match, date within ±3 days, not deleted.
@@ -594,7 +626,7 @@ export class YnabBudgetProvider implements BudgetProvider {
   }
 
   async createTransaction(
-    accountName: string,
+    accountId: string,
     merchant: string,
     category: string,
     transactionDate: string,
@@ -606,16 +638,18 @@ export class YnabBudgetProvider implements BudgetProvider {
     // Deterministic YNAB import_id (≤36 chars). On an ack-lost retry of
     // the SAME receipt, /import re-creates with the same import_id and
     // YNAB's native bank-import dedupe rejects the duplicate (F2).
-    // Account-scoped: YNAB's import_id uniqueness is per-account, and
-    // scoping by account also means a legitimate re-file of the same
-    // receipt to a DIFFERENT account is NOT silently swallowed. (Two
-    // genuinely-distinct receipts with identical account+merchant+date
-    // +amount still collide — same trade-off banks/YNAB make on real
-    // imports; rare and far less harmful than a duplicate transaction.)
+    // Keyed by the stable account *id* (not the mutable display name) so
+    // a YNAB rename never changes the dedupe key for the same account.
+    // YNAB's import_id uniqueness is per-account; scoping by account id
+    // also means a legitimate re-file of the same receipt to a DIFFERENT
+    // account is NOT silently swallowed. (Two genuinely-distinct receipts
+    // with identical account+merchant+date+amount still collide — same
+    // trade-off banks/YNAB make on real imports; rare and far less
+    // harmful than a duplicate transaction.)
     const importId =
       "BI:" +
       createHash("sha256")
-        .update(`${accountName}|${merchant}|${transactionDate}|${fixedTotalAmount}`)
+        .update(`${accountId}|${merchant}|${transactionDate}|${fixedTotalAmount}`)
         .digest("hex")
         .slice(0, 33);
     const fixedSplits = splits?.map((split) => ({
@@ -626,11 +660,7 @@ export class YnabBudgetProvider implements BudgetProvider {
 
     const budget = await getBudgets().getBudgetById(getBudgetId());
 
-    const accountId = budget.data.budget.accounts?.find(
-      (a) => a.name === accountName,
-    )?.id;
-
-    if (!accountId) {
+    if (!budget.data.budget.accounts?.some((a) => a.id === accountId)) {
       throw new Error("Account not found");
     }
 
@@ -677,6 +707,8 @@ export class YnabBudgetProvider implements BudgetProvider {
     // and a stale category list after the user changed budgets (F7/F9).
     _categoriesCache = null;
     _categoriesInFlight = null;
+    _accountsCache = null;
+    _accountsInFlight = null;
     _api = null;
     _budgets = null;
     _transactions = null;

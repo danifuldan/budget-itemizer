@@ -142,14 +142,64 @@ describe("Hono app integration", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /accounts with auth returns accounts", async () => {
-    vi.mocked(getAllAccounts).mockResolvedValue(["Checking", "Savings"]);
+  it("GET /accounts with auth returns {id,name} accounts", async () => {
+    vi.mocked(getAllAccounts).mockResolvedValue([
+      { id: "acc-1", name: "Checking" },
+      { id: "acc-2", name: "Savings" },
+    ] as any);
     const res = await app.request("/accounts", {
       headers: { Authorization: authHeader },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual(["Checking", "Savings"]);
+    expect(body).toEqual([
+      { id: "acc-1", name: "Checking" },
+      { id: "acc-2", name: "Savings" },
+    ]);
+  });
+
+  // The disagreement: hiddenAccounts now stores stable account IDs, not
+  // display names. A renamed account whose ID is hidden must stay hidden.
+  it("GET /accounts hides accounts whose ID is in hiddenAccounts", async () => {
+    vi.mocked(getAllAccounts).mockResolvedValue([
+      { id: "acc-1", name: "Checking" },
+      { id: "acc-2", name: "Renamed Savings" },
+    ] as any);
+    // Override every getConfig call for this test (auth middleware reads
+    // getConfig too). appApiKey:"" falls auth through to the env mock.
+    vi.mocked(getConfig).mockReturnValue({
+      hiddenAccounts: ["acc-2"],
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    const res = await app.request("/accounts", {
+      headers: { Authorization: authHeader },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
+  });
+
+  // Premortem Bug 2: on first post-upgrade launch hiddenAccounts still
+  // holds NAMES (the async startup migration hasn't reconciled them yet).
+  // The filter must keep them hidden until migration lands — otherwise
+  // previously-hidden accounts reappear in the dropdown.
+  it("GET /accounts also hides accounts whose NAME is in (un-migrated) hiddenAccounts", async () => {
+    vi.mocked(getAllAccounts).mockResolvedValue([
+      { id: "acc-1", name: "Checking" },
+      { id: "acc-2", name: "Bank of America" },
+    ] as any);
+    vi.mocked(getConfig).mockReturnValue({
+      hiddenAccounts: ["Bank of America"], // a NAME, not an id
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    const res = await app.request("/accounts", {
+      headers: { Authorization: authHeader },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
   });
 
   it("POST /import with valid body returns success", async () => {

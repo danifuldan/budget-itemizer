@@ -133,8 +133,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
             if (c.ynabBudgetId !== budgetAccountLoader.state.selectedBudgetId) {
               await budgetAccountLoader.selectBudget(c.ynabBudgetId);
             }
-            if (c.defaultAccount) {
-              budgetAccountLoader.setSelectedAccount(c.defaultAccount);
+            if (c.ynabAccountId) {
+              budgetAccountLoader.setSelectedAccount(c.ynabAccountId);
             }
           }
         }
@@ -185,12 +185,18 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           });
         }
         break;
-      case 4:
+      case 4: {
+        const acctId = budgetAccountLoader.state.selectedAccount;
+        const acctName = budgetAccountLoader.state.accounts.find((a) => a.id === acctId)?.name ?? "";
         ok = await saveSetup({
           ynabBudgetId: budgetAccountLoader.state.selectedBudgetId,
-          defaultAccount: budgetAccountLoader.state.selectedAccount,
+          // Identity is the id; name persisted alongside (backend
+          // isSetupComplete is name-keyed, readable config).
+          ynabAccountId: acctId,
+          defaultAccount: acctName,
         });
         break;
+      }
       case 5:
         ok = await saveSetup({ inboxPath, processedPath });
         break;
@@ -207,7 +213,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const budgets = budgetAccountLoader.state.budgets;
   const selectedBudget = budgetAccountLoader.state.selectedBudgetId;
   const accounts = budgetAccountLoader.state.accounts;
-  const selectedAccount = budgetAccountLoader.state.selectedAccount;
+  const selectedAccountId = budgetAccountLoader.state.selectedAccount;
   const loadingAccounts = budgetAccountLoader.state.loadingAccounts;
   const ynabResult = ynabTest.state.result;
   const ynabKey = ynabTest.state.apiKey;
@@ -511,13 +517,14 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
             <select
               id="setup-default-account"
               className="select"
-              value={selectedAccount}
+              value={selectedAccountId}
               onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
+              onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
               disabled={loadingAccounts || accounts.length === 0}
             >
               {accounts.length === 0 && <option value="">{loadingAccounts ? "Loading..." : "Select budget first"}</option>}
               {accounts.map((a) => (
-                <option key={a} value={a}>{a}</option>
+                <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
           </div>

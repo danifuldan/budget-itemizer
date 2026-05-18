@@ -28,8 +28,12 @@ meta.get("/accounts", auth, async (c) => {
     const showAll = c.req.query("all") === "true";
     if (showAll) return c.json(all, 200);
     const hidden = getConfig().hiddenAccounts;
+    // Tolerate un-migrated config: on the first post-upgrade launch
+    // hiddenAccounts still holds NAMES until the async startup migration
+    // reconciles them to ids. Match on either so previously-hidden
+    // accounts don't reappear in that window.
     const filtered = hidden.length > 0
-      ? all.filter((a) => !hidden.includes(a))
+      ? all.filter((a) => !hidden.includes(a.id) && !hidden.includes(a.name))
       : all;
     return c.json(filtered, 200);
   } catch (err: any) {

@@ -121,13 +121,19 @@ export const splitsSimilarity = (
   return union === 0 ? 1 : intersection / union;
 };
 
+// AccountRef is cross-tier (FE picker consumes the same shape). Single
+// source in shared/types; re-exported here so existing service-side
+// imports (budget-ynab, account-identity, …) keep their path.
+export type { AccountRef } from "../shared/types";
+import type { AccountRef } from "../shared/types";
+
 export interface BudgetProvider {
   readonly id: "ynab" | "actual";
   getAllCategories(): Promise<string[]>;
-  getAllAccounts(): Promise<string[]>;
+  getAllAccounts(): Promise<AccountRef[]>;
   getAllBudgets(): Promise<{ id: string; name: string }[]>;
   findMatchingTransaction(
-    accountName: string,
+    accountId: string,
     amount: number,
     date: string,
     merchant: string,
@@ -146,7 +152,7 @@ export interface BudgetProvider {
     splits?: { category: string; amount: number; memo?: string }[],
   ): Promise<void>;
   createTransaction(
-    accountName: string,
+    accountId: string,
     merchant: string,
     category: string,
     transactionDate: string,

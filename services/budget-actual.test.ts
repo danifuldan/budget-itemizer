@@ -69,8 +69,11 @@ describe("ActualBudgetProvider", () => {
       ] as any);
 
       const accounts = await provider.getAllAccounts();
-      expect(accounts).toEqual(["Checking", "Credit Card"]);
-      expect(accounts).not.toContain("Savings");
+      expect(accounts).toEqual([
+        { id: "a1", name: "Checking" },
+        { id: "a4", name: "Credit Card" },
+      ]);
+      expect(accounts.some((a) => a.id === "a2")).toBe(false);
       expect(accounts).not.toContain("Old Account");
     });
   });
@@ -88,7 +91,7 @@ describe("ActualBudgetProvider", () => {
       mockApi.addTransactions.mockResolvedValue(undefined as any);
 
       await provider.createTransaction(
-        "Checking",
+        "a1",
         "Walmart",
         "Groceries",
         "2026-03-15",
@@ -120,7 +123,7 @@ describe("ActualBudgetProvider", () => {
       mockApi.addTransactions.mockResolvedValue(undefined as any);
 
       await provider.createTransaction(
-        "Checking",
+        "a1",
         "Amazon",
         "Groceries",
         "2026-03-15",
@@ -159,7 +162,7 @@ describe("ActualBudgetProvider", () => {
       ] as any);
 
       const match = await provider.findMatchingTransaction(
-        "Checking",
+        "a1",
         12.99,
         "2026-03-15",
         "Walmart",
@@ -177,7 +180,7 @@ describe("ActualBudgetProvider", () => {
       ] as any);
 
       const match = await provider.findMatchingTransaction(
-        "Checking",
+        "a1",
         12.99,
         "2026-03-15",
         "Walmart",
@@ -197,7 +200,7 @@ describe("ActualBudgetProvider", () => {
       ] as any);
 
       const match = await provider.findMatchingTransaction(
-        "Checking",
+        "a1",
         12.99,
         "2026-03-15",
         "Walmart",

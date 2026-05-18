@@ -1,7 +1,13 @@
+import type { AccountRef } from "../api/types";
+
 interface ReviewFooterProps {
-  accounts: string[];
+  accounts: AccountRef[];
+  /** The selected account *id* (identity), not its display name. */
   selectedAccount: string;
-  onAccountChange: (account: string) => void;
+  onAccountChange: (accountId: string) => void;
+  /** Fired when the account picker is about to open — used to resync the
+   *  list so a YNAB-side rename shows immediately. */
+  onOpen?: () => void;
   onDiscard?: () => void;
   onImport: () => void;
   importDisabled: boolean;
@@ -12,6 +18,7 @@ export default function ReviewFooter({
   accounts,
   selectedAccount,
   onAccountChange,
+  onOpen,
   onDiscard,
   onImport,
   importDisabled,
@@ -26,11 +33,13 @@ export default function ReviewFooter({
           className="account-select"
           value={selectedAccount}
           onChange={(e) => onAccountChange(e.target.value)}
+          onMouseDown={onOpen}
+          onFocus={onOpen}
         >
           {accounts.length === 0 && <option value="">Loading accounts...</option>}
           {accounts.map((a) => (
-            <option key={a} value={a}>
-              {a}
+            <option key={a.id} value={a.id}>
+              {a.name}
             </option>
           ))}
         </select>

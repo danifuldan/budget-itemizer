@@ -375,9 +375,9 @@ const ensureDirs = (inbox: string, processed: string) => {
 
 export const autoImportParsed = async (entry: PendingFile) => {
   const config = getConfig();
-  const account = config.defaultAccount;
+  const account = config.ynabAccountId;
   if (!account) {
-    console.error("No default account configured, skipping auto-import");
+    console.error("No account configured, skipping auto-import");
     return;
   }
 

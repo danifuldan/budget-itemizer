@@ -12,6 +12,7 @@ export interface ConfigData {
   actualPassword: string;
   actualPasswordLength?: number;
   actualSyncId: string;
+  ynabAccountId: string;
   defaultAccount: string;
   inboxPath: string;
   processedPath: string;
@@ -34,6 +35,7 @@ const defaultConfig: ConfigData = {
   actualServerUrl: "",
   actualPassword: "",
   actualSyncId: "",
+  ynabAccountId: "",
   defaultAccount: "",
   inboxPath: "",
   processedPath: "",

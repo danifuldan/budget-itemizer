@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useBudgetAccountLoader } from "./useBudgetAccountLoader";
+import type { AccountRef } from "../api/types";
 
 vi.mock("../api/client", () => ({
   apiFetch: vi.fn(),
@@ -12,6 +13,9 @@ import { apiFetch, apiPost } from "../api/client";
 const mockApiFetch = vi.mocked(apiFetch);
 const mockApiPost = vi.mocked(apiPost);
 
+const refs = (...rs: [string, string][]): AccountRef[] =>
+  rs.map(([id, name]) => ({ id, name }));
+
 describe("useBudgetAccountLoader", () => {
   beforeEach(() => {
     mockApiFetch.mockReset();
@@ -20,7 +24,7 @@ describe("useBudgetAccountLoader", () => {
 
   it("selectBudget POSTs /config with the right field name (ynabBudgetId)", async () => {
     mockApiPost.mockResolvedValueOnce({});
-    mockApiFetch.mockResolvedValueOnce(["Checking", "Savings"]);
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"], ["acc-2", "Savings"]));
 
     const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "ynabBudgetId" }));
     await act(async () => { await result.current.selectBudget("budget-1"); });
@@ -38,22 +42,25 @@ describe("useBudgetAccountLoader", () => {
     expect(mockApiPost).toHaveBeenCalledWith("/config", { actualSyncId: "sync-xyz" });
   });
 
-  it("selectBudget fetches /accounts and auto-selects the first one", async () => {
+  it("selectBudget fetches /accounts and auto-selects the first one's id", async () => {
     mockApiPost.mockResolvedValueOnce({});
-    mockApiFetch.mockResolvedValueOnce(["Checking", "Savings"]);
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"], ["acc-2", "Savings"]));
 
     const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "ynabBudgetId" }));
     await act(async () => { await result.current.selectBudget("budget-1"); });
 
-    expect(result.current.state.accounts).toEqual(["Checking", "Savings"]);
-    expect(result.current.state.selectedAccount).toBe("Checking");
+    expect(result.current.state.accounts).toEqual(
+      refs(["acc-1", "Checking"], ["acc-2", "Savings"]),
+    );
+    // selectedAccount holds the stable id, not the display name.
+    expect(result.current.state.selectedAccount).toBe("acc-1");
   });
 
   it("loadAllAccounts=true triggers a second /accounts?all=true fetch", async () => {
     mockApiPost.mockResolvedValueOnce({});
     mockApiFetch
-      .mockResolvedValueOnce(["Checking"])
-      .mockResolvedValueOnce(["Checking", "Hidden"]);
+      .mockResolvedValueOnce(refs(["acc-1", "Checking"]))
+      .mockResolvedValueOnce(refs(["acc-1", "Checking"], ["acc-9", "Hidden"]));
 
     const { result } = renderHook(() => useBudgetAccountLoader({
       budgetIdField: "ynabBudgetId",
@@ -63,12 +70,14 @@ describe("useBudgetAccountLoader", () => {
 
     expect(mockApiFetch).toHaveBeenNthCalledWith(1, "/accounts");
     expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/accounts?all=true");
-    expect(result.current.state.allAccounts).toEqual(["Checking", "Hidden"]);
+    expect(result.current.state.allAccounts).toEqual(
+      refs(["acc-1", "Checking"], ["acc-9", "Hidden"]),
+    );
   });
 
   it("loadAllAccounts=false skips the all=true fetch (wizard case)", async () => {
     mockApiPost.mockResolvedValueOnce({});
-    mockApiFetch.mockResolvedValueOnce(["Checking"]);
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"]));
 
     const { result } = renderHook(() => useBudgetAccountLoader({
       budgetIdField: "ynabBudgetId",
@@ -99,8 +108,8 @@ describe("useBudgetAccountLoader", () => {
     // selectBudget eventually reaches /accounts. So the first mock = NEW
     // (second call wins), second mock = OLD (first call's stale response).
     mockApiFetch
-      .mockResolvedValueOnce(["NEW"])
-      .mockResolvedValueOnce(["OLD"]);
+      .mockResolvedValueOnce(refs(["new", "NEW"]))
+      .mockResolvedValueOnce(refs(["old", "OLD"]));
 
     const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "ynabBudgetId" }));
 
@@ -120,7 +129,7 @@ describe("useBudgetAccountLoader", () => {
       await secondPromise;
     });
 
-    expect(result.current.state.accounts).toEqual(["NEW"]);
+    expect(result.current.state.accounts).toEqual(refs(["new", "NEW"]));
 
     // Now unblock the stale first call's apiPost. Its fetchAccountsFor
     // returns ["OLD"], but the token check must drop it.
@@ -129,11 +138,11 @@ describe("useBudgetAccountLoader", () => {
       await firstPromise;
     });
 
-    expect(result.current.state.accounts).toEqual(["NEW"]);
+    expect(result.current.state.accounts).toEqual(refs(["new", "NEW"]));
   });
 
   it("refreshAccounts re-fetches without changing the budget id", async () => {
-    mockApiFetch.mockResolvedValueOnce(["A", "B"]);
+    mockApiFetch.mockResolvedValueOnce(refs(["a", "A"], ["b", "B"]));
     const { result } = renderHook(() => useBudgetAccountLoader({
       budgetIdField: "ynabBudgetId",
       initialSelectedBudgetId: "budget-x",
@@ -142,7 +151,7 @@ describe("useBudgetAccountLoader", () => {
     await act(async () => { await result.current.refreshAccounts(); });
 
     expect(result.current.state.selectedBudgetId).toBe("budget-x");
-    expect(result.current.state.accounts).toEqual(["A", "B"]);
+    expect(result.current.state.accounts).toEqual(refs(["a", "A"], ["b", "B"]));
     expect(mockApiPost).not.toHaveBeenCalled();
   });
 
@@ -160,10 +169,10 @@ describe("useBudgetAccountLoader", () => {
     const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "ynabBudgetId" }));
     act(() => {
       result.current.setBudgets([{ id: "x", name: "X" }]);
-      result.current.setSelectedAccount("Checking");
+      result.current.setSelectedAccount("acc-1");
     });
     expect(result.current.state.budgets).toEqual([{ id: "x", name: "X" }]);
-    expect(result.current.state.selectedAccount).toBe("Checking");
+    expect(result.current.state.selectedAccount).toBe("acc-1");
   });
 
   // Regression: settings's provider-switch flow needs to restore the

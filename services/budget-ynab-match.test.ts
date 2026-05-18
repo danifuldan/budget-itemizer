@@ -97,7 +97,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     expect(match?.id).toBe("t1");
   });
@@ -107,7 +107,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     getTransactionsByAccount.mockResolvedValue({ data: { transactions: [] } });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     expect(match).toBeNull();
   });
@@ -128,7 +128,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
     expect(match?.id).toBe("t1");
   });
 
@@ -144,7 +144,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     // Only the non-deleted candidate counts — unique → return it.
     expect(match?.id).toBe("t1");
@@ -168,7 +168,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     expect(match?.id).toBe("in-selected");
   });
@@ -188,7 +188,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     expect(match?.id).toBe("only-other");
   });
@@ -212,7 +212,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
 
     // Selected-account pool has 2 candidates that tie on every signal;
     // the first in the pool wins. We never fall back to the other-
@@ -238,7 +238,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Amazon");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Amazon");
     expect(match?.id).toBe("amzn");
   });
 
@@ -254,7 +254,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
     expect(match?.id).toBe("right-merchant");
   });
 
@@ -269,7 +269,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Fred");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Fred");
     expect(match?.id).toBe("zelle-fred");
   });
 
@@ -289,7 +289,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
     expect(match?.id).toBe("next-day");
   });
 
@@ -311,7 +311,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
     expect(match?.id).toBe("monday-a");
   });
 
@@ -339,7 +339,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     const provider = new YnabBudgetProvider();
     // Incoming receipt splits match the previously-imported tx exactly.
     const match = await provider.findMatchingTransaction(
-      "Checking",
+      "acc-1",
       50,
       "2026-01-15",
       "Walmart",
@@ -371,7 +371,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
 
     const provider = new YnabBudgetProvider();
     const match = await provider.findMatchingTransaction(
-      "Checking",
+      "acc-1",
       50,
       "2026-01-15",
       "Walmart",
@@ -400,7 +400,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
 
     const provider = new YnabBudgetProvider();
     const match = await provider.findMatchingTransaction(
-      "Checking",
+      "acc-1",
       50,
       "2026-01-15",
       "Walmart",
@@ -420,7 +420,7 @@ describe("YnabBudgetProvider.findMatchingTransaction", () => {
     });
 
     const provider = new YnabBudgetProvider();
-    const match = await provider.findMatchingTransaction("Checking", 50, "2026-01-15", "Walmart");
+    const match = await provider.findMatchingTransaction("acc-1", 50, "2026-01-15", "Walmart");
     expect(match).toBeNull();
   });
 });
