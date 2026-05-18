@@ -192,6 +192,23 @@ describe("adaptPrompt — JSON-reminder adapters (llama3.1, default)", () => {
     expect(lastUser?.content).toContain("Respond with valid JSON only");
   });
 
+  // #91-2: the bundled llama3.1 dropped Walmart's oddly-labeled
+  // expedite-delivery fee ("3 hours or less") and tax from
+  // summaryLabels. It must receive the online-order few-shot that
+  // teaches that pattern (previously wired only to llama3.2:3b).
+  it("injects the online-order expedite-fee few-shot for llama3.1 label-extraction", () => {
+    const result = adaptPrompt(
+      "llama3.1:8b",
+      "label-extraction",
+      [{ role: "user", content: "Analyze this receipt." }],
+      sampleSchema,
+    );
+    const allText = result.messages.map((m) => String(m.content)).join("\n");
+    expect(allText).toContain("3 hours or less");
+    // And it must classify that line as a fee in the few-shot answer.
+    expect(allText).toMatch(/"label"\s*:\s*"3 hours or less"\s*,\s*"type"\s*:\s*"fee"/);
+  });
+
   it("appends JSON reminder for unknown models (default fallthrough)", () => {
     const result = adaptPrompt(
       "mistral:7b",

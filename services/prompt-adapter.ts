@@ -235,17 +235,17 @@ Sourdough Bread     $5.49
 
 Subtotal            $11.37
 Savings             -$0.50
-Tax                 $0.00
-Below order minimum $6.99
+Tax                 $0.91
+3 hours or less     $5.00
 Driver tip          Free
 Delivery            Free
 
-Total               $17.86
+Total               $16.78
 
 Charge history
-Mar 8, 2026         $17.86
+Mar 8, 2026         $16.78
 Payment method
-VISA ending in 1234 $17.86
+VISA ending in 1234 $16.78
 Your payment method
 VISA ending in 1234`,
   assistant: JSON.stringify({
@@ -256,7 +256,10 @@ VISA ending in 1234`,
       { label: "Subtotal", type: "subtotal" },
       { label: "Savings", type: "discount" },
       { label: "Tax", type: "tax" },
-      { label: "Below order minimum", type: "fee" },
+      // Delivery-SPEED lines with a price ("3 hours or less", "Express",
+      // "2-hour") are an expedited-delivery FEE, even though the label
+      // names no fee. Capture them; never skip a priced summary line.
+      { label: "3 hours or less", type: "fee" },
       { label: "Driver tip", type: "fee" },
       { label: "Delivery", type: "shipping" },
     ],
@@ -427,6 +430,11 @@ const adapters: Adapter[] = [
 
       if (intent === "label-extraction") {
         adapted = injectFewShotExample(adapted, labelFewShotExample);
+        // Online-order summary blocks (Walmart.com etc.) carry
+        // oddly-labeled priced lines — expedited-delivery fees like
+        // "3 hours or less" — that the bundled model otherwise drops.
+        // This teaches it to capture every priced summary line.
+        adapted = injectFewShotExample(adapted, onlineOrderFewShotExample);
         adapted = appendToUserMessage(adapted, lineTextReminder);
       }
 
