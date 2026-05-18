@@ -6,10 +6,8 @@
 // longer matches the stored name leaves the id empty so the picker can
 // re-select (it must not guess).
 
-export interface AccountRef {
-  id: string;
-  name: string;
-}
+import type { AccountRef } from "./budget-provider";
+export type { AccountRef };
 
 interface MigratableConfig {
   budgetProvider: string;

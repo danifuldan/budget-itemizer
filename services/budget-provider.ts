@@ -121,13 +121,20 @@ export const splitsSimilarity = (
   return union === 0 ? 1 : intersection / union;
 };
 
+/** An account's stable id plus its current display name. Identity is the
+ *  id — a provider-side rename changes `name`, never `id`. */
+export interface AccountRef {
+  id: string;
+  name: string;
+}
+
 export interface BudgetProvider {
   readonly id: "ynab" | "actual";
   getAllCategories(): Promise<string[]>;
-  getAllAccounts(): Promise<string[]>;
+  getAllAccounts(): Promise<AccountRef[]>;
   getAllBudgets(): Promise<{ id: string; name: string }[]>;
   findMatchingTransaction(
-    accountName: string,
+    accountId: string,
     amount: number,
     date: string,
     merchant: string,
@@ -146,7 +153,7 @@ export interface BudgetProvider {
     splits?: { category: string; amount: number; memo?: string }[],
   ): Promise<void>;
   createTransaction(
-    accountName: string,
+    accountId: string,
     merchant: string,
     category: string,
     transactionDate: string,

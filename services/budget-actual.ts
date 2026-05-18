@@ -172,13 +172,13 @@ export class ActualBudgetProvider implements BudgetProvider {
       .map((c) => normalizeSpaces(c.name));
   }
 
-  async getAllAccounts(): Promise<string[]> {
+  async getAllAccounts(): Promise<{ id: string; name: string }[]> {
     await ensureBudget();
     const api = await loadApi();
     const accounts = await api.getAccounts();
     return accounts
       .filter((a) => !a.closed && !a.offbudget)
-      .map((a) => normalizeSpaces(a.name));
+      .map((a) => ({ id: a.id, name: normalizeSpaces(a.name) }));
   }
 
   async getAllBudgets(): Promise<{ id: string; name: string }[]> {
@@ -189,7 +189,7 @@ export class ActualBudgetProvider implements BudgetProvider {
   }
 
   async findMatchingTransaction(
-    accountName: string,
+    accountId: string,
     amount: number,
     date: string,
     merchant: string,
@@ -218,14 +218,14 @@ export class ActualBudgetProvider implements BudgetProvider {
       searchAccounts = onBudgetAccounts;
     } else {
       const account = onBudgetAccounts.find(
-        (a) => normalizeSpaces(a.name) === accountName,
+        (a) => a.id === accountId,
       );
       if (!account) throw new Error("Account not found");
       searchAccounts = [account];
     }
 
     const selectedAccount = onBudgetAccounts.find(
-      (a) => normalizeSpaces(a.name) === accountName,
+      (a) => a.id === accountId,
     );
 
     // Actual stores `payee` on transactions as an ID; resolve to name
@@ -402,7 +402,7 @@ export class ActualBudgetProvider implements BudgetProvider {
   }
 
   async createTransaction(
-    accountName: string,
+    accountId: string,
     merchant: string,
     category: string,
     transactionDate: string,
@@ -421,7 +421,7 @@ export class ActualBudgetProvider implements BudgetProvider {
     }));
 
     const accounts = await api.getAccounts();
-    const account = accounts.find((a) => normalizeSpaces(a.name) === accountName);
+    const account = accounts.find((a) => a.id === accountId);
     if (!account) throw new Error("Account not found");
 
     const categories = await api.getCategories();
