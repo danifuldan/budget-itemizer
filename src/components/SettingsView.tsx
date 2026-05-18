@@ -24,6 +24,9 @@ interface SettingsViewProps {
   configLoading: boolean;
   saveConfig: (updates: Partial<ConfigData>) => Promise<boolean>;
   appUpdate: ReturnType<typeof useAppUpdate>;
+  /** When opened from a status-link, scroll to this section
+   *  ("folder-watcher", "ai-model"). undefined = top. */
+  scrollToSection?: string;
 }
 
 /** Inline row that surfaces app-update state. Receives the hook return
@@ -64,8 +67,19 @@ function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }
   );
 }
 
-export default function SettingsView({ onBack, onRunSetup, themePreference, onThemeChange, config, configLoading: loading, saveConfig: save, appUpdate }: SettingsViewProps) {
+export default function SettingsView({ onBack, onRunSetup, themePreference, onThemeChange, config, configLoading: loading, saveConfig: save, appUpdate, scrollToSection }: SettingsViewProps) {
   const modelDownload = useModelDownload({ modelId: "llama3.1-8b" });
+
+  // Deep-link from a status-link: scroll the requested section into view.
+  // undefined (a plain Settings open) scrolls to the top so the view
+  // isn't left wherever a previous deep-link landed.
+  useEffect(() => {
+    const el = scrollToSection
+      ? document.getElementById(`settings-${scrollToSection}`)
+      : null;
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    else document.querySelector(".settings-scroll")?.scrollTo({ top: 0 });
+  }, [scrollToSection]);
 
   // budgetProvider is local state because it gates the dropdown
   // visibility and the hook wiring. Single useState — not worth a hook.
@@ -290,7 +304,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
 
       <div className="settings-scroll">
       {/* AI Model */}
-      <div className="settings-section">
+      <div className="settings-section" id="settings-ai-model">
         <h2 className="settings-section-title">AI Model</h2>
         <div className="settings-section-body">
           <ModelDownloadCard download={modelDownload} variant="settings" showInstalledRow />
@@ -488,7 +502,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       )}
 
       {/* Folder Watcher */}
-      <div className="settings-section">
+      <div className="settings-section" id="settings-folder-watcher">
         <h2 className="settings-section-title">Folder Watcher</h2>
         <div className="settings-section-body">
           <div className="field">

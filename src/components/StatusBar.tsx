@@ -10,7 +10,7 @@ interface StatusBarProps {
   llmReady: boolean;
   themePreference: ThemePreference;
   onThemeChange: (pref: ThemePreference) => void;
-  onSettingsClick: () => void;
+  onSettingsClick: (section?: string) => void;
 }
 
 const sunIcon = (
@@ -79,11 +79,11 @@ export default function StatusBar({ watcherRunning, watcherPath, watcherInboxExi
       <div className="status-group">
         {watcherDotColor && <span className={`status-dot ${watcherDotColor}`} aria-hidden="true" />}
         {watcherRunning ? (
-          <button className="status-link" onClick={onSettingsClick} aria-label={`Watching ${watcherPath || "inbox"}. Open settings to change.`}>
+          <button className="status-link" onClick={() => onSettingsClick("folder-watcher")} aria-label={`Watching ${watcherPath || "inbox"}. Open settings to change.`}>
             Watching {watcherPath || "inbox"}
           </button>
         ) : watcherBroken ? (
-          <button className="status-link" onClick={onSettingsClick} aria-label={`${watcherBrokenLabel}. Open settings.`}>
+          <button className="status-link" onClick={() => onSettingsClick("folder-watcher")} aria-label={`${watcherBrokenLabel}. Open settings.`}>
             {watcherBrokenLabel}
           </button>
         ) : (
@@ -92,7 +92,7 @@ export default function StatusBar({ watcherRunning, watcherPath, watcherInboxExi
       </div>
       <div className="status-group">
         <span className={`status-dot ${aiDotColor}`} aria-hidden="true" />
-        <button className="status-link" onClick={onSettingsClick} aria-label={`${aiLabel}. Open settings.`}>
+        <button className="status-link" onClick={() => onSettingsClick("ai-model")} aria-label={`${aiLabel}. Open settings.`}>
           {aiLabel}
         </button>
         {setupComplete && !llmReady && (

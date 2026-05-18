@@ -54,6 +54,9 @@ export interface AppState {
   lastFile: File | null;
   setupDismissed: boolean;
   sourceFilename: string | null;
+  /** When navigating to Settings via a status-link, the section to scroll
+   *  to (e.g. "folder-watcher", "ai-model"). undefined = top. */
+  settingsSection?: string;
 }
 
 export type AppAction =
@@ -74,7 +77,7 @@ export type AppAction =
   | { type: "START_IMPORT" }
   | { type: "IMPORT_SUCCESS" }
   | { type: "RESET" }
-  | { type: "NAVIGATE"; view: View }
+  | { type: "NAVIGATE"; view: View; settingsSection?: string }
   | { type: "DISMISS_SETUP" }
   | { type: "SET_SOURCE_FILE"; filename: string }
   | { type: "LOAD_RECEIPT"; receipt: Receipt; sourceFilename: string }
@@ -225,6 +228,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         view: action.view,
+        settingsSection: action.settingsSection,
         setupDismissed: state.view === "setup" ? true : state.setupDismissed,
       };
     case "DISMISS_SETUP":
@@ -657,6 +661,7 @@ export default function App() {
   if (state.view === "settings") {
     return (
       <SettingsView
+        scrollToSection={state.settingsSection}
         onBack={() => dispatch({ type: "NAVIGATE", view: "main" })}
         onRunSetup={() => dispatch({ type: "NAVIGATE", view: "setup" })}
         themePreference={themePreference}
@@ -803,7 +808,7 @@ export default function App() {
         llmReady={status.llmReady}
         themePreference={themePreference}
         onThemeChange={setTheme}
-        onSettingsClick={() => dispatch({ type: "NAVIGATE", view: "settings" })}
+        onSettingsClick={(section) => dispatch({ type: "NAVIGATE", view: "settings", settingsSection: section })}
       />
     </div>
   );

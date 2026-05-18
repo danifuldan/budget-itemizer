@@ -107,4 +107,16 @@ describe("reducer STREAM_DONE", () => {
     expect(state.items[0].lineItemTotalAmount).toBe(3);
     expect(state.items[1].lineItemTotalAmount).toBe(1);
   });
+
+  it("NAVIGATE carries an optional settingsSection (status-link deep-link)", () => {
+    const toWatcher = fold([
+      { type: "NAVIGATE", view: "settings", settingsSection: "folder-watcher" } as AppAction,
+    ]);
+    expect(toWatcher.view).toBe("settings");
+    expect(toWatcher.settingsSection).toBe("folder-watcher");
+
+    // A plain settings open (no section) must not carry a stale target.
+    const plain = fold([{ type: "NAVIGATE", view: "settings" } as AppAction]);
+    expect(plain.settingsSection).toBeUndefined();
+  });
 });
