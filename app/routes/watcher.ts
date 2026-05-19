@@ -15,6 +15,7 @@ import {
   getPendingFiles,
   getPending,
   removePending,
+  disposeSourceFile,
   queueFile,
 } from "../../services/watcher";
 
@@ -88,10 +89,26 @@ watcher.delete("/pending/:filename", auth, async (c) => {
     );
   }
 
+  // Discard disposes of the source the SAME way a successful import does
+  // (disposeSourceFile honors the deleteAfterImport retention setting):
+  // delete only if the user opted into not retaining receipt plaintext,
+  // otherwise MOVE it to processed/discarded/ — never destroy it on a
+  // cancel/failure against the user's stated preference.
+  const processedPath = getConfig().processedPath;
+  if (!processedPath) {
+    // Unreachable in practice (setup requires processedPath). Don't
+    // delete; just clear the queue entry.
+    console.warn(`No processedPath; discarding ${filename} without relocating its file`);
+    removePending(filename);
+    return c.json({ success: true }, 200);
+  }
   try {
-    fs.unlinkSync(pending.filePath);
+    disposeSourceFile(pending.filePath, filename, path.join(processedPath, "discarded"));
   } catch (e: any) {
-    console.warn(`Could not delete discarded file: ${e.message}`);
+    // Move failed (cross-device / perms). Do NOT removePending — keep the
+    // queue reflecting it so the receipt isn't silently lost.
+    console.warn(`Could not dispose discarded file ${filename}: ${e.message}`);
+    return c.json({ error: "Could not move the file out of the inbox" }, 500);
   }
   removePending(filename);
   return c.json({ success: true }, 200);

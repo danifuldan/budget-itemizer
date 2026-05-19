@@ -190,12 +190,18 @@ export const markPendingReady = (filename: string, receipt: Receipt): void => {
   watcherEvents.emit("file-parsed", { filename, receipt });
 };
 
-// --- Move (or delete) source file after successful import ---
-// When `deleteAfterImport` is on, the source PDF is unlinked instead of
-// archived. Reduces long-term plaintext retention of sensitive receipt
-// content (full addresses, last-4 card digits, item lists) in the
-// user's home directory. Default is move-to-processed; opt-in destructive.
-export const moveToProcessed = (filePath: string, filename: string) => {
+// --- Dispose of a source file after import OR discard ---
+// Governed by `deleteAfterImport`, a retention/privacy preference:
+// unlink if the user opted into not retaining receipt plaintext (full
+// addresses, last-4 card digits, item lists) in their home dir; else
+// move it, collision-safe, to `keepDir` (created on demand). ONE path so
+// import and discard disposition can't drift. `keepDir` falsy → leave
+// the file in place; NEVER delete outside the opt-in.
+export const disposeSourceFile = (
+  filePath: string,
+  filename: string,
+  keepDir: string,
+) => {
   const config = getConfig();
   if (config.deleteAfterImport) {
     try {
@@ -206,30 +212,42 @@ export const moveToProcessed = (filePath: string, filename: string) => {
     }
     return;
   }
-  const processedDir = config.processedPath;
-  if (processedDir) {
-    const safeName = path.basename(filename);
-    const ext = path.extname(safeName);
-    const base = safeName.slice(0, -ext.length || undefined);
-    // Find a non-colliding destination. Date.now() alone collides when
-    // two imports finish within the same millisecond (possible during a
-    // startup burst where multiple Order.pdf duplicates landed in inbox).
-    // Loop with an incrementing counter so the second mover never
-    // silently overwrites the first.
-    let dest = path.join(processedDir, safeName);
-    if (fs.existsSync(dest)) {
-      const stamp = Date.now();
-      let n = 0;
-      do {
-        const suffix = n === 0 ? `${stamp}` : `${stamp}-${n}`;
-        dest = path.join(processedDir, `${base}_${suffix}${ext}`);
-        n++;
-      } while (fs.existsSync(dest));
-    }
-    fs.renameSync(filePath, dest);
-    console.log(`  Moved to: ${dest}`);
+  if (!keepDir) return;
+  fs.mkdirSync(keepDir, { recursive: true });
+  const safeName = path.basename(filename);
+  const ext = path.extname(safeName);
+  const base = safeName.slice(0, -ext.length || undefined);
+  // Non-colliding destination. Date.now() alone collides when two moves
+  // land in the same millisecond (startup burst of duplicate Order.pdf,
+  // or import + discard racing). Incrementing counter so the second
+  // mover never silently overwrites the first.
+  let dest = path.join(keepDir, safeName);
+  if (fs.existsSync(dest)) {
+    const stamp = Date.now();
+    let n = 0;
+    do {
+      const suffix = n === 0 ? `${stamp}` : `${stamp}-${n}`;
+      dest = path.join(keepDir, `${base}_${suffix}${ext}`);
+      n++;
+    } while (fs.existsSync(dest));
   }
+  try {
+    fs.renameSync(filePath, dest);
+  } catch (e: any) {
+    if (e?.code !== "EXDEV") throw e;
+    // rename() can't span volumes (inbox on an external drive, processed
+    // on the internal disk). Copy then remove the source so the move
+    // still completes instead of failing the discard/import outright.
+    fs.copyFileSync(filePath, dest);
+    fs.unlinkSync(filePath);
+  }
+  console.log(`  Moved to: ${dest}`);
 };
+
+// Backward-compatible wrapper: the import path keeps the same name and
+// behavior (move to processedPath, or delete if opted in).
+export const moveToProcessed = (filePath: string, filename: string) =>
+  disposeSourceFile(filePath, filename, getConfig().processedPath);
 
 let watcher: fs.FSWatcher | null = null;
 
