@@ -137,8 +137,17 @@ function runSidecar<T>(
     );
 
     if (stdin) {
-      child.stdin?.write(stdin);
-      child.stdin?.end();
+      // Absorb async EPIPE if a signal-abort killed the child in the
+      // tiny window between spawn and the stdin write: an unlistened
+      // stdin 'error' event would otherwise propagate as an uncaught
+      // exception and crash the sidecar (premortem Bug 2).
+      child.stdin?.on("error", () => {});
+      try {
+        child.stdin?.write(stdin);
+        child.stdin?.end();
+      } catch {
+        /* child already dead — the execFile callback rejects with AbortError */
+      }
     }
   });
 }

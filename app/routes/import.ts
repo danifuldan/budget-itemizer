@@ -137,8 +137,12 @@ importRoutes.post(
       } catch (err: any) {
         // Intentional cancellation (client disconnected) — suppress the
         // noisy error log and don't write an error event to a stream the
-        // FE already abandoned.
-        if (aborted || err?.name === "AbortError") {
+        // FE already abandoned. Gate ONLY on `aborted` (set by
+        // stream.onAbort), NOT on err.name === "AbortError" — the 120s
+        // fetch safety-timeout also surfaces as AbortError but isn't a
+        // user cancellation; it must fall through to surface an error
+        // event so the FE shows feedback (premortem Bug 1).
+        if (aborted) {
           await writeChain;
           return;
         }

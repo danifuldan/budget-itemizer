@@ -86,6 +86,12 @@ export const removePending = (filename: string): boolean => pendingFiles.delete(
 // whose status is "parsing" so the in-flight LLM call (which pins a
 // llama slot) stops promptly instead of running to completion against
 // an abandoned receipt. Cleared in queueFile's finally.
+//
+// CONTRACT: abortParse stops the work but does NOT remove the pending
+// entry — the caller owns the pendingFiles lifecycle (removePending).
+// `reapStaleClaims` only covers "importing"; an aborted "parsing" entry
+// will stick forever if the caller forgets removePending. The current
+// caller (app/routes/watcher.ts DELETE handler) does both correctly.
 const parseControllers = new Map<string, AbortController>();
 export const abortParse = (filename: string): boolean => {
   const c = parseControllers.get(filename);
@@ -615,7 +621,12 @@ export const queueFile = async (filePath: string, autoImport = false) => {
   } catch (err: any) {
     // Cancelled (Discard-while-parsing fired abortParse) is NOT a parse
     // error — leave the entry untouched; the discarder owns removePending.
-    if (err?.name === "AbortError" || controller.signal.aborted) {
+    // Gate ONLY on our controller, not err.name === "AbortError" — the
+    // existing 120s fetch safety-timeout also surfaces as AbortError but
+    // leaves controller.signal.aborted === false; that case must fall
+    // through to the error path so the user sees feedback instead of a
+    // stuck "parsing" entry (premortem Bug 1).
+    if (controller.signal.aborted) {
       console.log(`  Parse aborted: ${filename}`);
       return;
     }

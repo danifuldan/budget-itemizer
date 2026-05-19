@@ -44,6 +44,7 @@ vi.mock("./receipt", () => ({
 }));
 
 import { queueFile, abortParse, getPending } from "./watcher";
+import { parseImageReceiptStream } from "./receipt";
 
 beforeEach(() => {
   tmpInbox = fs.mkdtempSync(path.join(os.tmpdir(), "wc-inbox-"));
@@ -79,5 +80,27 @@ describe("queueFile cancellation (step 2)", () => {
 
   it("abortParse returns false when no parse is in flight for that name", () => {
     expect(abortParse("nope.pdf")).toBe(false);
+  });
+
+  // Premortem Bug 1: the catch's silent-bail must NOT trip on every
+  // AbortError — only on user-initiated cancellation (our controller).
+  // The fetch inside callLLM/callLLMStream still uses
+  // AbortSignal.timeout(120_000) as a safety net; that timeout firing
+  // also surfaces as AbortError but leaves controller.signal.aborted ===
+  // false. It MUST be classified as a parse error, not silently bailed.
+  it("AbortError from the 120s safety timeout (not user-abort) → entry MUST be 'error'", async () => {
+    // Unique filename — pendingFiles persists across tests in this suite
+    // and the prior abort-not-error test leaves "receipt.pdf" at
+    // status="parsing", so reusing it would short-circuit queueFile's
+    // dedup and skip our mock.
+    const filename = "timeout-receipt.pdf";
+    fs.writeFileSync(path.join(tmpInbox, filename), "PDF");
+    // Override the default hanging mock for this one call: simulate the
+    // fetch timeout signal firing AbortError without the user controller.
+    vi.mocked(parseImageReceiptStream).mockImplementationOnce(async () => {
+      throw new DOMException("LLM safety timeout", "AbortError");
+    });
+    await queueFile(path.join(tmpInbox, filename), false);
+    expect(getPending(filename)?.status).toBe("error");
   });
 });
