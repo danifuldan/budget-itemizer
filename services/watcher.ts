@@ -616,6 +616,127 @@ const processInbox = (inboxPath: string) => {
   }
 };
 
+/** Pure: should the reachability heartbeat re-arm the watcher? Re-arm
+ *  ONLY on the unreachable→reachable transition. Re-arming while still
+ *  reachable churns fs.watch and re-runs processInbox every tick
+ *  (duplicate enqueue); there is nothing to re-arm on disconnect. */
+export function watcherReconcileDecision(
+  prevExists: boolean,
+  nowExists: boolean,
+): { rearm: boolean } {
+  return { rearm: !prevExists && nowExists };
+}
+
+// Reachability heartbeat: fs.watch silently dies when its directory is
+// unmounted (ejected drive / dropped network mount) and does NOT re-arm
+// when the path returns. Without this, post-reconnect status reads green
+// "Watching" while the handle is dead. Polls; on the false→true
+// transition it re-creates the handle and rescans (dedup makes the
+// rescan safe).
+const REARM_POLL_MS = 5000;
+let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+let lastInboxExists = false;
+
+// Single fs.watch callsite — startWatcher and the heartbeat re-arm both
+// go through here so the debounce/dedup behavior cannot drift between
+// the initial arm and a re-arm.
+const armWatch = (inbox: string): void => {
+  const w = fs.watch(inbox, (eventType, filename) => {
+    if (!filename || path.extname(filename).toLowerCase() !== ".pdf") return;
+
+    const filePath = path.join(inbox, filename);
+
+    // Small delay to let file finish writing, then enqueue. Tracked so
+    // stopWatcher can cancel pending debounces — otherwise a "Stop
+    // watcher → change inbox" flow can fire delayed enqueues against
+    // the OLD inbox after the watcher was already torn down.
+    trackedSetTimeout(() => {
+      if (!watcher) return; // watcher was stopped between schedule and fire
+      if (!fs.existsSync(filePath)) return;
+      enqueue(filePath);
+    }, 1000);
+  });
+  // fs.watch emits 'error' on some unmount/permission transitions; an
+  // 'error' with no listener is rethrown as an uncaught exception →
+  // dead sidecar. Fail closed (instance-scoped, like the llama exit
+  // handler): drop this handle and reset reachability so the heartbeat
+  // re-arms on the next reachable tick.
+  w.on("error", (err: any) => {
+    console.error(`Inbox watch error for ${inbox}: ${err?.code ?? err?.message ?? err}`);
+    try {
+      w.close();
+    } catch {
+      /* already dead */
+    }
+    if (watcher === w) watcher = null;
+    lastInboxExists = false;
+  });
+  watcher = w;
+};
+
+/** One heartbeat tick, pure w.r.t. injected deps so the latch-on-success
+ *  invariant is unit-testable. Re-arm only on the unreachable→reachable
+ *  transition, and latch `reachable` ONLY if the re-arm actually
+ *  succeeded — otherwise leave it false so the next tick retries
+ *  (premortem Bug 1: a transient re-arm failure must not consume the
+ *  transition forever). */
+export function reconcileTick(
+  prevExists: boolean,
+  inbox: string,
+  deps: {
+    exists: (p: string) => boolean;
+    closeWatch: () => void;
+    armWatch: (inbox: string) => void;
+    rescan: (inbox: string) => void;
+  },
+): { nextExists: boolean } {
+  const now = !!inbox && deps.exists(inbox);
+  const { rearm } = watcherReconcileDecision(prevExists, now);
+  if (!rearm) return { nextExists: now };
+  try {
+    deps.closeWatch();
+  } catch {
+    /* stale handle is likely already dead — ignore */
+  }
+  try {
+    deps.armWatch(inbox);
+    deps.rescan(inbox);
+    return { nextExists: true };
+  } catch (err: any) {
+    console.error(`Watcher re-arm failed for ${inbox}: ${err?.code ?? err?.message ?? err}`);
+    return { nextExists: false };
+  }
+}
+
+const startReachabilityHeartbeat = (): void => {
+  if (reconcileTimer) return;
+  reconcileTimer = setInterval(() => {
+    const { nextExists } = reconcileTick(lastInboxExists, getConfig().inboxPath, {
+      exists: (p) => fs.existsSync(p),
+      closeWatch: () => {
+        try {
+          watcher?.close();
+        } finally {
+          // Null even if close() throws so a failed re-arm reads as
+          // "not watching" (honest) during the ≤REARM_POLL_MS retry
+          // window, never green.
+          watcher = null;
+        }
+      },
+      armWatch,
+      rescan: (inbox) => {
+        // Files dropped while the inbox was gone. fileDedupKey +
+        // recentlyProcessed + YNAB import_id dedupe make this safe.
+        processInbox(inbox);
+        console.log(`Inbox reachable again — watcher re-armed: ${inbox}`);
+      },
+    });
+    lastInboxExists = nextExists;
+  }, REARM_POLL_MS);
+  // Never let the heartbeat keep the sidecar alive at shutdown.
+  reconcileTimer.unref?.();
+};
+
 export const startWatcher = (): WatcherStatus => {
   const config = getConfig();
   const inbox = config.inboxPath;
@@ -641,25 +762,15 @@ export const startWatcher = (): WatcherStatus => {
   // paths. Catch so the watcher fails closed (running: false) instead of
   // taking the whole sidecar down with it.
   try {
-    watcher = fs.watch(inbox, (eventType, filename) => {
-      if (!filename || path.extname(filename).toLowerCase() !== ".pdf") return;
-
-      const filePath = path.join(inbox, filename);
-
-      // Small delay to let file finish writing, then enqueue. Tracked so
-      // stopWatcher can cancel pending debounces — otherwise a "Stop
-      // watcher → change inbox" flow can fire delayed enqueues against
-      // the OLD inbox after the watcher was already torn down.
-      trackedSetTimeout(() => {
-        if (!watcher) return; // watcher was stopped between schedule and fire
-        if (!fs.existsSync(filePath)) return;
-        enqueue(filePath);
-      }, 1000);
-    });
+    armWatch(inbox);
   } catch (err: any) {
     console.error(`Could not watch inbox at ${inbox}: ${err?.code ?? err?.message ?? err}`);
     return { running: false, inboxPath: inbox, processedPath: processed, inboxExists: fs.existsSync(inbox) };
   }
+
+  // Track reachability and start the reconnect heartbeat (idempotent).
+  lastInboxExists = fs.existsSync(inbox);
+  startReachabilityHeartbeat();
 
   return { running: true, inboxPath: inbox, processedPath: processed, inboxExists: fs.existsSync(inbox) };
 };
@@ -674,6 +785,11 @@ export const stopWatcher = () => {
     for (const t of pendingTimers) clearTimeout(t);
     pendingTimers.clear();
     recentlyProcessed.clear();
+    if (reconcileTimer) {
+      clearInterval(reconcileTimer);
+      reconcileTimer = null;
+    }
+    lastInboxExists = false;
     console.log("Watcher stopped.");
   }
 };
