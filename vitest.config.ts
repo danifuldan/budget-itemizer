@@ -1,6 +1,14 @@
 import { defineConfig } from "vitest/config";
+import { readFileSync } from "fs";
+
+const pkgVersion = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version as string;
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   test: {
     globals: true,
     // Default to node for backend tests; src/** runs in happy-dom for

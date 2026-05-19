@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ConfigData } from "../hooks/useConfig";
 import { useAppUpdate } from "../hooks/useAppUpdate";
+import { APP_VERSION } from "../appVersion";
 import { getAutostart, setAutostart } from "../hooks/useTauriAutostart";
 import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
@@ -660,6 +661,9 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           {saving ? "Saving..." : saved ? "Saved!" : "Save Settings"}
         </button>
         <UpdateRow appUpdate={appUpdate} />
+        <div className="settings-version" aria-label={`Budget Itemizer version ${APP_VERSION}`}>
+          Budget Itemizer v{APP_VERSION}
+        </div>
         <div className="settings-footer-links">
           {onRunSetup && (
             <>
