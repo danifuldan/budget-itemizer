@@ -226,7 +226,8 @@ export const buildReceiptFromLabels = (labels: LabelResult, text: string): Recei
 const assignCategories = async (
   items: { productName: string; lineItemTotalAmount: number }[],
   merchant: string,
-  availableCategories: string[]
+  availableCategories: string[],
+  signal?: AbortSignal,
 ): Promise<(string | null)[]> => {
   if (items.length === 0) return [];
 
@@ -277,6 +278,7 @@ Assign a category to each item. Return a JSON array with one category string per
       ],
       categorySchema,
       "category-assignment",
+      signal, // Discard-while-categorizing aborts the in-flight LLM call.
     );
 
     console.log("[categories] Raw LLM response:", content.slice(0, 500));
@@ -303,13 +305,14 @@ Assign a category to each item. Return a JSON array with one category string per
 
 const assignReceiptCategories = async (
   receipt: Receipt,
-  availableCategories: string[]
+  availableCategories: string[],
+  signal?: AbortSignal,
 ): Promise<void> => {
   const items = receipt.lineItems || [];
   if (items.length === 0) return;
 
   console.log(`Assigning categories to ${items.length} items from ${receipt.merchant}...`);
-  const categories = await assignCategories(items, receipt.merchant, availableCategories);
+  const categories = await assignCategories(items, receipt.merchant, availableCategories, signal);
 
   items.forEach((item, i) => {
     if (categories[i]) item.category = categories[i]!;
@@ -340,6 +343,7 @@ export const parseReceiptFromTextStream = async (
   events: StreamEventCallbacks,
   sourceUrl?: string,
   fullText?: string,
+  signal?: AbortSignal,
 ): Promise<Receipt | null> => {
   console.log(`[stream] Input length: ${content.length} chars`);
 
@@ -409,6 +413,7 @@ ${cleaned}`;
       ],
       labelSchema(),
       "label-extraction",
+      signal, // Discard-while-parsing aborts the streaming LLM call.
     )) {
       parser.feed(delta);
     }
@@ -460,7 +465,7 @@ ${cleaned}`;
   if (availableCategories && availableCategories.length > 0) {
     await events.onStatus?.("categorizing", { itemCount: (receipt.lineItems ?? []).length });
 
-    await assignReceiptCategories(receipt, availableCategories);
+    await assignReceiptCategories(receipt, availableCategories, signal);
 
     await events.onCategories?.((receipt.lineItems ?? []).map((li) => li.category));
   }

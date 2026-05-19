@@ -17,6 +17,7 @@ export const callLLM = async (
   messages: ChatMessage[],
   jsonSchema?: Record<string, unknown>,
   intent?: PromptIntent,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const adapted = adaptPrompt(model, intent, messages, jsonSchema);
 
@@ -45,7 +46,12 @@ export const callLLM = async (
     method: "POST",
     headers,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    // User cancellation (Discard / view abort) + the existing 120s safety
+    // timeout. AbortSignal.any (Node 20.3+) settles on whichever fires
+    // first; either aborts the in-flight LLM call so the llama slot frees.
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
@@ -67,6 +73,7 @@ export async function* callLLMStream(
   messages: ChatMessage[],
   jsonSchema?: Record<string, unknown>,
   intent?: PromptIntent,
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   const adapted = adaptPrompt(model, intent, messages, jsonSchema);
 
@@ -96,7 +103,10 @@ export async function* callLLMStream(
     method: "POST",
     headers,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    // See callLLM: user cancellation + 120s safety timeout, whichever first.
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {

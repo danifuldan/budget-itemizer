@@ -270,6 +270,7 @@ const extractReceiptText = async (
 export const parseImageReceiptStream = async (
   file: File,
   events: StreamEventCallbacks,
+  signal?: AbortSignal,
 ): Promise<Receipt> => {
   if (file.type !== "application/pdf") {
     throw new ReceiptParseError(`unsupported file type "${file.type}"`);
@@ -289,6 +290,7 @@ export const parseImageReceiptStream = async (
     events,
     extracted.sourceUrl,
     extracted.fullText,
+    signal, // Aborts the streaming label LLM call + the category-assign LLM call.
   );
 
   if (!receipt) {
