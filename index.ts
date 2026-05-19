@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import * as net from "net";
 import env from "./utils/env-vars";
-import { startWatcher, revalidatePendingCategories } from "./services/watcher";
+import { startWatcher, startWatcherOnBoot, revalidatePendingCategories } from "./services/watcher";
 import { loadConfig, getConfig, saveConfig, isSetupComplete } from "./services/config";
 import { runStartupAccountMigration } from "./services/account-identity";
 import { getAllAccounts } from "./services/budget";
@@ -46,11 +46,12 @@ async function findAvailablePort(preferred: number, maxAttempts = 10): Promise<n
 async function main() {
   const config = await loadConfig();
 
-  // Start the bundled llama-server — resolves when health check passes.
-  let llmReady: Promise<void> | null = null;
+  // Start the bundled llama-server. Fire-and-forget: nothing in boot
+  // awaits readiness — the watcher starts immediately (queueFile waits
+  // for the server before parsing) and the FE polls /status for llmReady.
   const modelPath = getModelPath(config.embeddedModel);
   if (modelPath) {
-    llmReady = startLlamaServer(modelPath).then(() => {}).catch((err) => {
+    startLlamaServer(modelPath).catch((err) => {
       console.error("Failed to start llama-server:", err);
     });
   } else {
@@ -105,25 +106,19 @@ async function main() {
       console.log(`SERVER_PORT=${info.port}`);
       console.log(`Server running on http://localhost:${info.port}`);
 
-      // Wait for LLM before starting the watcher — don't process receipts until ready
-      if (llmReady) {
-        await llmReady;
-      }
-
-      // Auto-start watcher if setup is complete and watcher is enabled
-      if (isSetupComplete()) {
-        const config = getConfig();
-        if (config.watcherEnabled !== false) {
-          const status = startWatcher();
-          if (status.running) {
-            console.log(`Watcher active: ${status.inboxPath}`);
-          }
-        } else {
-          console.log("Watcher disabled in config — not started.");
-        }
-      } else {
-        console.log("Setup incomplete — watcher not started. Configure via /setup endpoints.");
-      }
+      // Start the inbox watcher as soon as the server binds. It does NOT
+      // depend on the LLM: queueFile waits for llama-server before
+      // parsing, so a receipt dropped during model warmup is queued and
+      // shown as "Loading AI model…", not lost. Gating the watcher on
+      // llmReady previously produced a false "inbox unreachable" status
+      // and no pending entry for the whole warmup window. (llmReady's
+      // failure is already logged via its .catch above; nothing after
+      // this point needs to await it.)
+      startWatcherOnBoot({
+        isSetupComplete,
+        getConfig: () => getConfig(),
+        startWatcher,
+      });
 
       // Non-blocking: reconcile account identity from the mutable display
       // NAME to the stable YNAB id. Runs AFTER serve binds so it never

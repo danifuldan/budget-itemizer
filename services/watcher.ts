@@ -687,3 +687,32 @@ export const getWatcherStatus = (): WatcherStatus => {
     inboxExists: !!config.inboxPath && fs.existsSync(config.inboxPath),
   };
 };
+
+export interface WatcherBootDeps {
+  isSetupComplete: () => boolean;
+  getConfig: () => { watcherEnabled?: boolean };
+  startWatcher: () => WatcherStatus;
+}
+
+// Boot wiring, injectable for the same reason runStartupAccountMigration
+// is: thin orchestration with a real contract. Deliberately takes NO LLM
+// signal — the watcher does not depend on llama-server (queueFile waits
+// for it before parsing), so gating the watcher start on llmReady only
+// produced a false "inbox unreachable" status during model warmup and
+// hid pending entries for receipts dropped while loading. Returns the
+// status when started, null when intentionally not started.
+export const startWatcherOnBoot = (deps: WatcherBootDeps): WatcherStatus | null => {
+  if (!deps.isSetupComplete()) {
+    console.log("Setup incomplete — watcher not started. Configure via /setup endpoints.");
+    return null;
+  }
+  if (deps.getConfig().watcherEnabled === false) {
+    console.log("Watcher disabled in config — not started.");
+    return null;
+  }
+  const status = deps.startWatcher();
+  if (status.running) {
+    console.log(`Watcher active: ${status.inboxPath}`);
+  }
+  return status;
+};
