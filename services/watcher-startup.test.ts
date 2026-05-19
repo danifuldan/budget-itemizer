@@ -47,4 +47,26 @@ describe("startWatcherOnBoot", () => {
     });
     expect(startWatcher).not.toHaveBeenCalled();
   });
+
+  it("does not propagate a startWatcher() throw — unreachable inbox at launch must not crash boot", () => {
+    // Premortem Bug 1: startWatcher() runs ensureDirs()/processInbox()
+    // BEFORE its own fs.watch try/catch, so an unreachable inbox
+    // (unplugged drive at launch) throws. startWatcherOnBoot runs on the
+    // serve-bind path immediately before runStartupAccountMigration; an
+    // escaped throw rejects the bind callback and skips the migration.
+    // Must fail closed (return null) — same never-throws-at-boot contract
+    // runStartupAccountMigration already has.
+    const startWatcher = vi.fn<() => WatcherStatus>(() => {
+      throw new Error("ENOENT: ensureDirs failed (inbox on unplugged volume)");
+    });
+    let status: WatcherStatus | null = running;
+    expect(() => {
+      status = startWatcherOnBoot({
+        isSetupComplete: () => true,
+        getConfig: () => ({ watcherEnabled: true }) as any,
+        startWatcher,
+      });
+    }).not.toThrow();
+    expect(status).toBeNull();
+  });
 });

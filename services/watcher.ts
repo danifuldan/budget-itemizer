@@ -710,7 +710,22 @@ export const startWatcherOnBoot = (deps: WatcherBootDeps): WatcherStatus | null 
     console.log("Watcher disabled in config — not started.");
     return null;
   }
-  const status = deps.startWatcher();
+  // startWatcher() can throw before its own fs.watch try/catch (e.g.
+  // ensureDirs()/processInbox() on an unreachable inbox — unplugged
+  // volume at launch). This runs on the serve-bind path immediately
+  // before runStartupAccountMigration; never let a throw escape and
+  // reject the bind callback (which would also skip the migration).
+  // Fail closed, same never-throws-at-boot contract the migration has.
+  let status: WatcherStatus;
+  try {
+    status = deps.startWatcher();
+  } catch (err) {
+    console.error(
+      `Watcher failed to start: ${err instanceof Error ? err.message : err}. ` +
+        `Inbox may be unreachable — check Settings.`,
+    );
+    return null;
+  }
   if (status.running) {
     console.log(`Watcher active: ${status.inboxPath}`);
   }
