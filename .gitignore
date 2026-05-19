@@ -195,8 +195,11 @@ dist-server/
 # Swift Package Manager build artifacts
 swift-sidecar/.build/
 
-# Project docs (strategy, research, planning)
+# Project docs (strategy, research, planning) — incl. the working TODO,
+# which moved here from a tracked root TODO.md (internal planning/audit
+# trail, kept out of the public repo going forward).
 docs/
+/TODO.md
 
 # Dev scratch files
 debug-*.ts
