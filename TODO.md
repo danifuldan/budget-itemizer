@@ -292,3 +292,30 @@ Per the 2026-05-12 discussion. Pick a pattern per artifact:
 
 ### RELEASE.md whole-flow checklist
 - [x] Expand the existing `RELEASE.md` to cover the full pre-release flow: version bump → run Tier A smoke → run Tier B smoke (personal) → fresh-install smoke (personal) → signed build → sign manifest → gh release create → verify endpoint returns latest.json → install on a separate test Mac (or VM) and observe update-available dot. → see "Pre-release smoke" section in RELEASE.md.
+
+## Update notification UX (2026-05-19, user)
+
+The "Update available" state is a footnote inside Settings — invisible to
+anyone who doesn't open Settings. Make it discoverable and lower-friction
+without alarm. (v0.3.4 added the version readout in the Settings footer;
+the updater pipeline + Check now are validated working.)
+
+- [ ] **Surface availability on the persistent StatusBar** — small accent
+  notification dot on the gear/settings control so an available update is
+  visible from the main screen. This is the already-intended
+  "Update-available gear dot" (RELEASE.md §0), now unblocked since the
+  release flow works.
+- [ ] **Promote the in-Settings "available" state to a real callout** —
+  distinct weight + accent border, primary "Install & relaunch" button
+  (not a `btn-link`). Calm-but-prominent. NOT all-red: red stays reserved
+  for the truthful failure outcomes so a broken updater stays
+  distinguishable; a small badge/dot may be red at dot scale.
+- [ ] **Auto-download in the background**, then prompt to restart to
+  install (Slack/VS Code pattern). Never auto-restart. Defer/suppress the
+  restart nudge while a parse or YNAB import is in flight (money app,
+  in-progress state). Preserve truthful failure surfacing for a failed
+  background download.
+- [ ] **Acknowledge the firewall/Gatekeeper re-prompt in-app** — the app
+  is unsigned so every self-update re-triggers it; for beta, just tell
+  the user it's expected (not a blocker; full fix = notarization, separate
+  workstream).
