@@ -90,13 +90,16 @@ importRoutes.post(
       // explicitly abandoned as a clickable "ready" row (F3). Mirror the
       // watcher route's onAbort handling.
       let aborted = false;
+      const controller = new AbortController();
       stream.onAbort(() => {
         aborted = true;
-        // Don't leave the entry stuck "parsing" forever: the parse keeps
-        // running (no cancellation plumbed) and onDone is now skipped, so
-        // nothing would ever transition it (the stale-claim reaper only
-        // covers "importing"). Drop it — the user abandoned it. Idempotent
-        // if an explicit Discard already DELETEd it.
+        // Cancel the in-flight parse so the LLM call stops promptly and
+        // frees its slot, instead of running to completion on a receipt
+        // the user already abandoned. (Pre-step-3, the parse kept running
+        // and only the FE result was suppressed.)
+        controller.abort();
+        // Drop the entry — the user abandoned it. Idempotent if an
+        // explicit Discard already DELETEd it.
         removePending(pendingName);
       });
 
@@ -111,23 +114,34 @@ importRoutes.post(
       };
 
       try {
-        await parseImageReceiptStream(file, {
-          onStatus: (step, detail) => writeEvent("status", { step, ...detail }),
-          onHeader: (header) => writeEvent("header", header),
-          onTotal: (totals) => writeEvent("total", totals),
-          onItem: (item) => writeEvent("item", item),
-          onCategories: (categories) => writeEvent("categories", { categories }),
-          onDone: (receipt) => {
-            // User abandoned this parse — do not resurrect it.
-            if (aborted) return;
-            markPendingReady(pendingName, receipt);
-            writeEvent("done", { receipt });
+        await parseImageReceiptStream(
+          file,
+          {
+            onStatus: (step, detail) => writeEvent("status", { step, ...detail }),
+            onHeader: (header) => writeEvent("header", header),
+            onTotal: (totals) => writeEvent("total", totals),
+            onItem: (item) => writeEvent("item", item),
+            onCategories: (categories) => writeEvent("categories", { categories }),
+            onDone: (receipt) => {
+              // User abandoned this parse — do not resurrect it.
+              if (aborted) return;
+              markPendingReady(pendingName, receipt);
+              writeEvent("done", { receipt });
+            },
+            onError: (error, step) => writeEvent("error", { message: error.message, step }),
           },
-          onError: (error, step) => writeEvent("error", { message: error.message, step }),
-        });
+          controller.signal,
+        );
         // Flush any queued writes
         await writeChain;
       } catch (err: any) {
+        // Intentional cancellation (client disconnected) — suppress the
+        // noisy error log and don't write an error event to a stream the
+        // FE already abandoned.
+        if (aborted || err?.name === "AbortError") {
+          await writeChain;
+          return;
+        }
         console.error("Error in streaming receipt parse:", err);
         writeEvent("error", {
           message: err.message || "An unknown error occurred.",

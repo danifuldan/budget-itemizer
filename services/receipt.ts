@@ -233,6 +233,7 @@ export const emitReceiptEvents = async (
 const extractReceiptText = async (
   fileBuffer: Buffer,
   events: StreamEventCallbacks,
+  signal?: AbortSignal,
 ): Promise<{ text: string; fullText?: string; sourceUrl?: string } | null> => {
   await events.onStatus?.("reading-pdf");
 
@@ -245,7 +246,7 @@ const extractReceiptText = async (
       fs.writeFileSync(pdfPath, fileBuffer);
       try {
         await events.onStatus?.("analyzing-layout");
-        const result = await runVision(pdfPath, 6);
+        const result = await runVision(pdfPath, 6, undefined, signal);
         const text = buildTextFromVisionResult(result);
         if (text) {
           const fullPageText = result.pages.map((p) => p.text).join("\n");
@@ -276,10 +277,24 @@ export const parseImageReceiptStream = async (
     throw new ReceiptParseError(`unsupported file type "${file.type}"`);
   }
 
-  const fileBuffer = Buffer.from(await file.arrayBuffer());
-  const ynabCategories = await getAllCategories();
+  // Early-abort checks between the fast steps. The slow LLM call gets
+  // signal directly (step 1); getAllCategories is 5-min cached + 30s
+  // timeout protected so threading the signal into the provider has
+  // negligible marginal value vs the contract churn; pdf.js text
+  // extract is fast-and-sync-ish. So we check signal.aborted between
+  // these and fail fast instead of threading deeper.
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw new DOMException("Parse aborted", "AbortError");
+  };
 
-  const extracted = await extractReceiptText(fileBuffer, events);
+  throwIfAborted();
+  const fileBuffer = Buffer.from(await file.arrayBuffer());
+  throwIfAborted();
+  const ynabCategories = await getAllCategories();
+  throwIfAborted();
+
+  const extracted = await extractReceiptText(fileBuffer, events, signal);
+  throwIfAborted();
   if (!extracted) {
     throw new ReceiptParseError("no text extracted from PDF");
   }

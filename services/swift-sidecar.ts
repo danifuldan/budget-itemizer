@@ -74,13 +74,17 @@ function runSidecar<T>(
   schema: z.ZodSchema<T>,
   args: string[] = [],
   stdin?: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const bin = findSwiftBinary();
     const child = execFile(
       bin,
       [command, ...args],
-      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+      // signal kills the child on abort (Node's documented execFile
+      // behavior; default SIGTERM) so a Discard-while-OCR'ing stops the
+      // swift sidecar instead of letting it run to completion.
+      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024, signal },
       (error, stdout, stderr) => {
         if (stderr) {
           // Swift sidecar uses stderr for logging — forward to console
@@ -90,6 +94,14 @@ function runSidecar<T>(
         }
 
         if (error) {
+          // Aborted via the AbortSignal — surface as a clean Web-style
+          // AbortError so callers can distinguish cancellation from a
+          // real sidecar failure.
+          if ((error as NodeJS.ErrnoException).code === "ABORT_ERR" || error.name === "AbortError") {
+            const abortErr = new DOMException("Sidecar aborted", "AbortError");
+            reject(abortErr);
+            return;
+          }
           // Try to parse stdout as JSON error even on failure
           try {
             const parsed = JSON.parse(stdout);
@@ -170,12 +182,17 @@ export interface CropRegion {
   h: number;
 }
 
-export async function runVision(pdfPath: string, scale?: number, crop?: CropRegion): Promise<VisionResult> {
+export async function runVision(
+  pdfPath: string,
+  scale?: number,
+  crop?: CropRegion,
+  signal?: AbortSignal,
+): Promise<VisionResult> {
   // Pass the PDF path via stdin JSON rather than --input argv so it
   // doesn't show up in `ps` listings visible to other same-user
   // processes. The Swift sidecar accepts either form.
   const stdinJson: Record<string, unknown> = { input: pdfPath };
   if (scale) stdinJson.scale = scale;
   if (crop) stdinJson.crop = `${crop.x},${crop.y},${crop.w},${crop.h}`;
-  return runSidecar("vision", visionResultSchema, [], JSON.stringify(stdinJson));
+  return runSidecar("vision", visionResultSchema, [], JSON.stringify(stdinJson), signal);
 }
