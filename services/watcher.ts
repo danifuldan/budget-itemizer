@@ -80,6 +80,20 @@ export const getPendingFiles = (): PendingFile[] => {
 
 export const removePending = (filename: string): boolean => pendingFiles.delete(filename);
 
+// --- In-flight parse cancellation ---
+// queueFile registers an AbortController per filename here; the DELETE
+// /watcher/pending handler calls abortParse() when discarding an entry
+// whose status is "parsing" so the in-flight LLM call (which pins a
+// llama slot) stops promptly instead of running to completion against
+// an abandoned receipt. Cleared in queueFile's finally.
+const parseControllers = new Map<string, AbortController>();
+export const abortParse = (filename: string): boolean => {
+  const c = parseControllers.get(filename);
+  if (!c) return false;
+  c.abort();
+  return true;
+};
+
 /** Drop pending entries when the user moves their inbox in Settings.
  *  Mid-flight entries (status="importing" or "parsing") are preserved —
  *  their in-flight handlers must reach a terminal state to clean up.
@@ -563,26 +577,32 @@ export const queueFile = async (filePath: string, autoImport = false) => {
     await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
   }
 
+  const controller = new AbortController();
+  parseControllers.set(filename, controller);
   try {
     const buffer = fs.readFileSync(filePath);
     const file = new File([buffer], filename, { type: "application/pdf" });
-    const receipt = await parseImageReceiptStream(file, {
-      onStatus: (step) => {
-        watcherEvents.emit("file-parse-progress", { filename, event: "status", data: { step } });
+    const receipt = await parseImageReceiptStream(
+      file,
+      {
+        onStatus: (step) => {
+          watcherEvents.emit("file-parse-progress", { filename, event: "status", data: { step } });
+        },
+        onHeader: (header) => {
+          watcherEvents.emit("file-parse-progress", { filename, event: "header", data: header });
+        },
+        onItem: (item) => {
+          watcherEvents.emit("file-parse-progress", { filename, event: "item", data: item });
+        },
+        onTotal: (totals) => {
+          watcherEvents.emit("file-parse-progress", { filename, event: "total", data: totals });
+        },
+        onCategories: (categories) => {
+          watcherEvents.emit("file-parse-progress", { filename, event: "categories", data: categories });
+        },
       },
-      onHeader: (header) => {
-        watcherEvents.emit("file-parse-progress", { filename, event: "header", data: header });
-      },
-      onItem: (item) => {
-        watcherEvents.emit("file-parse-progress", { filename, event: "item", data: item });
-      },
-      onTotal: (totals) => {
-        watcherEvents.emit("file-parse-progress", { filename, event: "total", data: totals });
-      },
-      onCategories: (categories) => {
-        watcherEvents.emit("file-parse-progress", { filename, event: "categories", data: categories });
-      },
-    });
+      controller.signal,
+    );
 
     entry.receipt = receipt;
     entry.status = "ready";
@@ -593,10 +613,18 @@ export const queueFile = async (filePath: string, autoImport = false) => {
       await autoImportParsed(entry);
     }
   } catch (err: any) {
+    // Cancelled (Discard-while-parsing fired abortParse) is NOT a parse
+    // error — leave the entry untouched; the discarder owns removePending.
+    if (err?.name === "AbortError" || controller.signal.aborted) {
+      console.log(`  Parse aborted: ${filename}`);
+      return;
+    }
     entry.status = "error";
     entry.parseError = err.message || String(err);
     console.error(`  Error parsing ${filename}:`, err);
     watcherEvents.emit("file-parsed", { filename, error: entry.parseError });
+  } finally {
+    parseControllers.delete(filename);
   }
 };
 

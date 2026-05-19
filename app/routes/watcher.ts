@@ -16,6 +16,7 @@ import {
   getPending,
   removePending,
   disposeSourceFile,
+  abortParse,
   queueFile,
 } from "../../services/watcher";
 
@@ -87,6 +88,14 @@ watcher.delete("/pending/:filename", auth, async (c) => {
       { error: "File was re-uploaded after you opened this view. Refresh and try again." },
       409,
     );
+  }
+
+  // Cancel any in-flight parse for this entry first — otherwise the LLM
+  // call would keep running on the abandoned file, pinning a llama slot
+  // until it completes. queueFile's catch treats AbortError as a quiet
+  // cancellation (not an error entry).
+  if (pending.status === "parsing") {
+    abortParse(filename);
   }
 
   // Discard disposes of the source the SAME way a successful import does
