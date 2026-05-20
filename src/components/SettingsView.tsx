@@ -661,9 +661,6 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           {saving ? "Saving..." : saved ? "Saved!" : "Save Settings"}
         </button>
         <UpdateRow appUpdate={appUpdate} />
-        <div className="settings-version" aria-label={`Budget Itemizer version ${APP_VERSION}`}>
-          Budget Itemizer v{APP_VERSION}
-        </div>
         <div className="settings-footer-links">
           {onRunSetup && (
             <>
@@ -700,6 +697,9 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           >
             Report a bug
           </button>
+        </div>
+        <div className="settings-version" aria-label={`Budget Itemizer version ${APP_VERSION}`}>
+          Budget Itemizer v{APP_VERSION}
         </div>
       </div>
       </div>

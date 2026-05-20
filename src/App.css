@@ -2178,6 +2178,13 @@ body::after {
   color: var(--text-1);
 }
 
+/* Settings titlebar right-aligns its contents (back button + title)
+   per the per-screen layout preference. Scoped so other views' titlebars
+   keep their default left layout. */
+.settings-view .titlebar-content {
+  justify-content: flex-end;
+}
+
 .settings-section {
   margin-bottom: 12px;
   overflow: hidden;
@@ -2264,6 +2271,15 @@ body::after {
 
 .settings-update-text {
   color: var(--text-2);
+}
+
+/* Build signature: centered, muted, breathing room. Sits below the
+   footer-links row, not jammed between UpdateRow and the action links. */
+.settings-version {
+  text-align: center;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 /* ========================================
