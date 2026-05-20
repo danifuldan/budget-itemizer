@@ -2,7 +2,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager, RunEvent,
+    Manager, RunEvent, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_log::{Target, TargetKind};
@@ -146,6 +146,18 @@ pub fn run() {
             get_app_credentials,
             reveal_logs
         ])
+        // Red close-button = HIDE the window, never quit. The sidecar +
+        // watcher + LLM stay running; the tray icon and dock icon stay
+        // visible. Only an explicit Quit (Cmd+Q / app menu) shuts the
+        // app down (via RunEvent::Exit → shutdown_sidecar). App is
+        // macOS-only today but this behavior is sensible cross-platform
+        // if it ever gets ported (users can still Quit via the app menu).
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
 
             // Spawn sidecar server in release builds only.
@@ -276,13 +288,32 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
-        if let RunEvent::Exit = event {
-            // Kill sidecar on app exit
-            let child = app_handle.state::<SidecarState>().0.lock().unwrap().take();
-            if let Some(child) = child {
-                shutdown_sidecar(child);
-                log::info!("Sidecar server stopped");
+        match event {
+            // Quit (Cmd+Q / app menu) is the only path that gets here:
+            // the close button is intercepted by on_window_event above
+            // and the window is hidden instead. So reaching Exit really
+            // does mean "user wants the app down."
+            RunEvent::Exit => {
+                let child = app_handle.state::<SidecarState>().0.lock().unwrap().take();
+                if let Some(child) = child {
+                    shutdown_sidecar(child);
+                    log::info!("Sidecar server stopped");
+                }
             }
+            // macOS dock-icon click after the window was hidden by the
+            // close button — bring the main window back into view.
+            // Mirrors the tray-icon click handler. Without this the
+            // dock click is silently dropped and the window is
+            // unreachable until Quit-and-relaunch.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            _ => {}
         }
     });
 }

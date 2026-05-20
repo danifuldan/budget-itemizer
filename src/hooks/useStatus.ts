@@ -33,10 +33,33 @@ export function useStatus() {
   // polling cadence, then re-read for the rest of the shape. Single
   // hook call — useRetryableFetch reacts to intervalMs changes.
   const [llmReadyForCadence, setLlmReadyForCadence] = useState(false);
+
+  // When the window is hidden (red close-button on macOS hides it but
+  // keeps the webview alive) the FE has no user to update, so pause
+  // /status polling. The server-side watcher + parse pipeline run
+  // independently of this hook — they keep working. Polling resumes on
+  // visibilitychange when the window returns. `intervalMs: undefined`
+  // tells useRetryableFetch not to schedule the next tick.
+  const [visible, setVisible] = useState(() =>
+    typeof document === "undefined" ? true : !document.hidden,
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onChange = () => setVisible(!document.hidden);
+    document.addEventListener("visibilitychange", onChange);
+    return () => document.removeEventListener("visibilitychange", onChange);
+  }, []);
+
+  const intervalMs = !visible
+    ? undefined
+    : llmReadyForCadence
+      ? NORMAL_INTERVAL_MS
+      : FAST_INTERVAL_MS;
+
   const { data: raw, loading, refresh } = useRetryableFetch<StatusResponse>(
     "/status",
     {},
-    { intervalMs: llmReadyForCadence ? NORMAL_INTERVAL_MS : FAST_INTERVAL_MS },
+    { intervalMs },
   );
 
   // Sticky "have we ever loaded" flag. App.tsx uses this to gate splash vs.
