@@ -30,7 +30,7 @@ const DATA_DIR = path.join(os.homedir(), ".config", "budget-itemizer", "actual-d
 
 /** Route Actual-server-prefixed requests to the `insecure` dispatcher
  *  (self-signed-cert tolerant); everything else uses the default. */
-function makeScopedDispatcher(
+export function makeScopedDispatcher(
   trustedPrefix: string,
   insecure: Agent,
   fallback: Dispatcher,
@@ -59,6 +59,13 @@ let _budgetLoaded = false;
 // restores undefined; B restores "0" — net: env var permanently "0",
 // defeating the entire scoping fix this block exists to provide.
 let _initPromise: Promise<void> | null = null;
+// Dispatcher in place before we installed the scoped self-signed one,
+// kept so shutdown() can restore strict TLS. The scoped dispatcher stays
+// installed for the whole connection (see ensureServer); restoring it
+// right after init — the original behavior — broke every post-login call
+// (list-user-files, /sync, accounts) against a self-signed or
+// hostname-mismatched cert, silently yielding an empty budget list.
+let _previousDispatcher: Dispatcher | null = null;
 
 const ensureServer = async () => {
   if (_serverConnected) return;
@@ -89,6 +96,7 @@ const ensureServer = async () => {
         previousDispatcher!,
       );
       setGlobalDispatcher(scopedDispatcher);
+      _previousDispatcher = previousDispatcher;
     }
     try {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -100,6 +108,12 @@ const ensureServer = async () => {
       });
       _serverConnected = true;
     } catch (err) {
+      // Init failed — restore strict TLS so an abandoned connection
+      // doesn't leave the scoped relaxation installed.
+      if (isHttps && previousDispatcher) {
+        setGlobalDispatcher(previousDispatcher);
+        _previousDispatcher = null;
+      }
       if (err instanceof BudgetConnectionError) throw err;
       // Intent-only message — the SDK's err.message can leak internal
       // /snapshot/ paths from the pkg-bundled node_modules, stack
@@ -110,12 +124,11 @@ const ensureServer = async () => {
         "Could not connect to Actual Budget server. Check the server URL and password in Settings.",
         { cause: err },
       );
-    } finally {
-      // Restore the original dispatcher. Long-lived connections opened
-      // during init keep their negotiated TLS context — same caveat
-      // as before — but at least the scope while *active* was per-host.
-      if (isHttps && previousDispatcher) setGlobalDispatcher(previousDispatcher);
     }
+    // On success the scoped dispatcher stays installed for the whole
+    // session — the SDK opens new connections after init (list-user-files,
+    // /sync, accounts) that must also reach the self-signed origin.
+    // Restored in shutdown() (or on init failure above).
   })();
 
   try {
@@ -491,5 +504,10 @@ export class ActualBudgetProvider implements BudgetProvider {
     }
     _serverConnected = false;
     _budgetLoaded = false;
+    // Restore the strict TLS dispatcher swapped out for this connection.
+    if (_previousDispatcher) {
+      setGlobalDispatcher(_previousDispatcher);
+      _previousDispatcher = null;
+    }
   }
 }

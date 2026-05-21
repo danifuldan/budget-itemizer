@@ -1,14 +1,18 @@
-// Regression test for TLS handling in services/budget-actual.ts.
+// TLS-handling tests for services/budget-actual.ts.
+//
 // The original implementation set NODE_TLS_REJECT_UNAUTHORIZED process-wide
-// during init, with a save/restore that could interleave between two
-// concurrent callers and permanently leave it "0". The current
-// implementation uses a per-host undici dispatcher swap. This test verifies
-// (a) the env var is never touched and (b) the global dispatcher is
-// restored after init settles — under two concurrent callers, the
-// singleton init promise must serialize so the dispatcher swap-back
-// runs exactly once.
+// during init (a save/restore that could interleave between concurrent
+// callers and leak "0"). That was replaced with a per-host undici
+// dispatcher swap. A later bug: the swap was restored *immediately after
+// init*, so every post-login call (list-user-files, /sync, accounts) ran
+// with strict TLS and silently failed against a self-signed or
+// hostname-mismatched cert — the budget list came back empty. The fix
+// keeps the scoped dispatcher installed for the whole session and restores
+// it on shutdown(). These tests pin: (a) env var never touched, (b) the
+// singleton init lock, (c) scoped dispatcher persists until shutdown, and
+// (d) the scoping only relaxes TLS for the Actual origin.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getGlobalDispatcher } from "undici";
+import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
 vi.mock("./config", () => ({
   getConfig: vi.fn(() => ({
@@ -18,16 +22,20 @@ vi.mock("./config", () => ({
 }));
 
 // The Actual API takes time to init; that delay is the window where the race
-// happens. We mock a 50ms init so the test can race two concurrent callers.
+// happens. Mock a 50ms init so the test can race two concurrent callers.
 const initSpy = vi.fn(async () => {
   await new Promise((r) => setTimeout(r, 50));
 });
-vi.mock("@actual-app/api", () => ({
+const apiMock = {
   init: initSpy,
-  default: { init: initSpy },
-}));
+  getBudgets: vi.fn(async () => []),
+  shutdown: vi.fn(async () => {}),
+};
+vi.mock("@actual-app/api", () => ({ ...apiMock, default: apiMock }));
 
-describe("budget-actual ensureServer", () => {
+const FILE_ORIGINAL_DISPATCHER = getGlobalDispatcher();
+
+describe("budget-actual TLS dispatcher scoping", () => {
   let originalTlsReject: string | undefined;
 
   beforeEach(() => {
@@ -43,25 +51,57 @@ describe("budget-actual ensureServer", () => {
     } else {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalTlsReject;
     }
+    // Safety: never let a scoped dispatcher leak between tests.
+    setGlobalDispatcher(FILE_ORIGINAL_DISPATCHER);
   });
 
-  it("two concurrent first-init calls don't leak TLS relaxation after settle", async () => {
+  it("inits once across concurrent callers, never touches the env var, keeps the scoped dispatcher until shutdown", async () => {
     const originalDispatcher = getGlobalDispatcher();
     const mod = await import("./budget-actual");
     const provider = new mod.ActualBudgetProvider();
 
-    // Race two callers. Without the singleton lock, the dispatcher swap
-    // and swap-back interleave and the scoped dispatcher leaks past init.
+    // Race two callers. The singleton lock must serialize them.
     await Promise.all([
       provider.getAllBudgets().catch(() => {}),
       provider.getAllBudgets().catch(() => {}),
     ]);
 
-    // Env var was never touched by the new implementation.
+    // Env var was never touched by the dispatcher-based implementation.
     expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined();
-    // Global dispatcher restored to what we started with.
-    expect(getGlobalDispatcher()).toBe(originalDispatcher);
-    // api.init should only have been called once across both attempts.
+    // Singleton lock: init ran exactly once across both callers.
     expect(initSpy).toHaveBeenCalledTimes(1);
+    // THE FIX: scoped dispatcher stays installed after init (so post-login
+    // calls reach the self-signed origin). The old code restored strict TLS
+    // here, which is exactly what broke list-user-files → empty budgets.
+    expect(getGlobalDispatcher()).not.toBe(originalDispatcher);
+
+    // Disconnect restores strict TLS.
+    await provider.shutdown();
+    expect(getGlobalDispatcher()).toBe(originalDispatcher);
+  });
+
+  it("relaxes TLS ONLY for the Actual origin; every other host keeps full validation", async () => {
+    const mod = await import("./budget-actual");
+    const insecure = { dispatch: vi.fn(() => true), close: vi.fn(), destroy: vi.fn() };
+    const fallback = { dispatch: vi.fn(() => true), close: vi.fn(), destroy: vi.fn() };
+    const scoped = mod.makeScopedDispatcher(
+      "https://actual.local",
+      insecure as never,
+      fallback as never,
+    );
+    const handler = {} as never;
+
+    // Request to the user's Actual origin → insecure agent (self-signed OK).
+    scoped.dispatch({ origin: "https://actual.local", path: "/list-user-files" } as never, handler);
+    expect(insecure.dispatch).toHaveBeenCalledTimes(1);
+    expect(fallback.dispatch).not.toHaveBeenCalled();
+
+    // Any other origin (e.g. YNAB) → fallback dispatcher = full cert +
+    // hostname validation. This is the security invariant the swap-back
+    // used to provide; the scoped router provides it without breaking the
+    // Actual calls.
+    scoped.dispatch({ origin: "https://api.ynab.com", path: "/v1/budgets" } as never, handler);
+    expect(fallback.dispatch).toHaveBeenCalledTimes(1);
+    expect(insecure.dispatch).toHaveBeenCalledTimes(1); // still just the one
   });
 });
