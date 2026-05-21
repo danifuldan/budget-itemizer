@@ -2178,22 +2178,21 @@ body::after {
   color: var(--text-1);
 }
 
-/* Settings titlebar: "Settings" centered across the full window, back
-   button pinned to the top-right. The title is absolutely positioned
-   against .titlebar-region (made relative below) so it spans the FULL
-   width INCLUDING the 70px macOS traffic-light spacer — that's what
-   keeps it window-centered rather than centered only in the content
-   area (which would sit ~35px right of true center). pointer-events:none
-   lets window-drag and back-button clicks pass through the title.
-   Scoped to .settings-view so other views' titlebars keep their default
-   left-aligned layout. */
-.settings-view .titlebar-region {
+/* Settings header layout: the macOS title bar (drag region + traffic
+   lights) stands alone as the top strip so nothing competes with the
+   "stoplight bar". The back button (top-left) and centered "Settings"
+   title live in their own row directly below it, above the scrollable
+   content. The title is absolutely positioned across the full row width
+   so it lands on true window center; pointer-events:none lets the
+   back-button click pass through it. */
+.settings-subheader {
   position: relative;
+  display: flex;
+  align-items: center;
+  padding: 2px 12px 10px;
+  flex-shrink: 0;
 }
-.settings-view .titlebar-content {
-  justify-content: flex-end;
-}
-.settings-view .settings-header-title {
+.settings-subheader .settings-header-title {
   position: absolute;
   inset: 0;
   margin: 0;

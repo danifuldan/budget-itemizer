@@ -290,7 +290,8 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
   if (loading) {
     return (
       <div className="settings-view">
-        <TitlebarRegion>
+        <TitlebarRegion />
+        <div className="settings-subheader">
           <button className="btn-ghost" onClick={onBack}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10 3L5 8l5 5" />
@@ -298,7 +299,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
             Back
           </button>
           <h1 className="settings-header-title">Settings</h1>
-        </TitlebarRegion>
+        </div>
       </div>
     );
   }
@@ -322,7 +323,8 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       onCancel={modelDownload.cancelDelete}
     />
     <div className="settings-view">
-      <TitlebarRegion>
+      <TitlebarRegion />
+      <div className="settings-subheader">
         <button className="btn-ghost" onClick={onBack}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 3L5 8l5 5" />
@@ -330,7 +332,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
           Back
         </button>
         <h1 className="settings-header-title">Settings</h1>
-      </TitlebarRegion>
+      </div>
 
       <div className="settings-scroll">
       {/* AI Model */}
