@@ -4,6 +4,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
+import { budgetIdFieldFor, budgetIdUpdateFor } from "../lib/budgetProvider";
 import { apiFetch } from "../api/client";
 import TitlebarRegion from "./TitlebarRegion";
 import ConfirmDialog from "./ConfirmDialog";
@@ -39,12 +40,17 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const { saveSetup } = useSetup();
 
+  // Step 2: Budget Provider. Declared before the loader because the
+  // loader's budgetIdField depends on it — selectBudget() POSTs the
+  // selected id to the field this returns (ynabBudgetId vs actualSyncId).
+  const [budgetProvider, setBudgetProvider] = useState<"ynab" | "actual">("ynab");
+
   // Budget/account loader feeds both Test-Connection callbacks (for
   // seeding the budget list + auto-fetching accounts) and the step-4
   // dropdowns. Declared first so the test hooks below can reference it
   // in their onTested callbacks.
   const budgetAccountLoader = useBudgetAccountLoader({
-    budgetIdField: "ynabBudgetId",
+    budgetIdField: budgetIdFieldFor(budgetProvider),
     loadAllAccounts: false,
   });
 
@@ -86,9 +92,6 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
       }
     },
   });
-
-  // Step 2: Budget Provider
-  const [budgetProvider, setBudgetProvider] = useState<"ynab" | "actual">("ynab");
 
   // Surfaces a save-setup failure so the user knows why Next didn't
   // advance. Cleared on every Next attempt and on field edits.
@@ -189,7 +192,11 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         const acctId = budgetAccountLoader.state.selectedAccount;
         const acctName = budgetAccountLoader.state.accounts.find((a) => a.id === acctId)?.name ?? "";
         ok = await saveSetup({
-          ynabBudgetId: budgetAccountLoader.state.selectedBudgetId,
+          // Route the budget id to the ACTIVE provider's field
+          // (ynabBudgetId vs actualSyncId). The original bug hardcoded
+          // ynabBudgetId, so an Actual sync id landed in the wrong field
+          // and isSetupComplete() never saw a budget → setup looped.
+          ...budgetIdUpdateFor(budgetProvider, budgetAccountLoader.state.selectedBudgetId),
           // Identity is the id; name persisted alongside (backend
           // isSetupComplete is name-keyed, readable config).
           ynabAccountId: acctId,
@@ -338,7 +345,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
               onChange={(e) => setBudgetProvider(e.target.value as "ynab" | "actual")}
             >
               <option value="ynab">YNAB</option>
-              {/* Actual Budget temporarily disabled — no test server to verify the setup field-mapping fix */}
+              <option value="actual">Actual Budget</option>
             </select>
           </div>
           <div className="wizard-nav">
@@ -416,7 +423,6 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Actual Budget temporarily disabled — no test server to verify the setup field-mapping fix. Re-enable: remove this wrapper + uncomment the chooser option in step 2.
       {step === 3 && budgetProvider === "actual" && (
         <div className="wizard-card animate-in">
           <div className="wizard-icon" aria-hidden="true">
@@ -486,7 +492,6 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           </div>
         </div>
       )}
-      */}
 
       {step === 4 && (
         <div className="wizard-card animate-in">
@@ -587,7 +592,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
             </div>
             <div className="check-item">
               <div className="check-icon">&#10003;</div>
-              Connected to YNAB
+              Connected to {budgetProvider === "ynab" ? "YNAB" : "Actual Budget"}
             </div>
             <div className="check-item">
               <div className="check-icon">&#10003;</div>

@@ -8,6 +8,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
+import { budgetIdFieldFor } from "../lib/budgetProvider";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { apiFetch, apiPost } from "../api/client";
 import Toggle from "./Toggle";
@@ -115,7 +116,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
   const savedProvider = config.budgetProvider || "ynab";
   const savedBudgetId = savedProvider === "actual" ? config.actualSyncId : config.ynabBudgetId;
   const budgetAccountLoader = useBudgetAccountLoader({
-    budgetIdField: budgetProvider === "ynab" ? "ynabBudgetId" : "actualSyncId",
+    budgetIdField: budgetIdFieldFor(budgetProvider),
     loadAllAccounts: true,
     initialSelectedBudgetId: savedBudgetId || "",
     initialSelectedAccount: config.ynabAccountId || "",
@@ -184,7 +185,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     if (loading || initialized.current) return;
     initialized.current = true;
 
-    setBudgetProvider("ynab"); // Actual Budget temporarily disabled — force YNAB regardless of stored config
+    setBudgetProvider(config.budgetProvider || "ynab");
     setInboxPath(config.inboxPath);
     setProcessedPath(config.processedPath);
     setDeleteAfterImport(config.deleteAfterImport ?? false);
@@ -344,7 +345,6 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       <div className="settings-section">
         <h2 className="settings-section-title">Budget Connection</h2>
         <div className="settings-section-body">
-          {/* Budget App chooser hidden — Actual Budget temporarily disabled (no test server to verify the setup field-mapping fix). Re-enable: uncomment this + the Actual block below, restore README FAQ + package.json.
           <div className="field">
             <label className="label" htmlFor="settings-budget-provider">Budget App</label>
             <select id="settings-budget-provider" className="select" value={budgetProvider} onChange={(e) => handleProviderChange(e.target.value as "ynab" | "actual")}>
@@ -352,7 +352,6 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
               <option value="actual">Actual Budget</option>
             </select>
           </div>
-          */}
 
           {budgetProvider === "ynab" && (
             <>
@@ -416,7 +415,6 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
             </>
           )}
 
-          {/* Actual Budget temporarily disabled — no test server available to verify the setup field-mapping fix. Reverting: remove this wrapper + the chooser comment above, restore README FAQ + package.json.
           {budgetProvider === "actual" && (
             <>
               <div className="field">
@@ -477,7 +475,6 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
               </div>
             </>
           )}
-          */}
 
           {/* Default Account — shared across providers, shown when a budget is selected */}
           {((budgetProvider === "ynab" && ynabBudgetId) || (budgetProvider === "actual" && actualSyncId)) && (
