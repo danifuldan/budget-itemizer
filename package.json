@@ -52,7 +52,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@actual-app/api": "^26.3.0",
+    "@actual-app/api": "^26.5.2",
     "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.4.2",
     "@tauri-apps/api": "^2.10.1",
