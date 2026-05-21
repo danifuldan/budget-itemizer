@@ -2186,10 +2186,11 @@ body::after {
    so it lands on true window center; pointer-events:none lets the
    back-button click pass through it. */
 .settings-subheader {
+  /* Shares .review-toolbar (flex + 14px 24px padding + tinted back button)
+     so the Settings back button is pixel-identical to the receipt-review
+     one. This rule only adds the relative positioning the centered-title
+     overlay needs. */
   position: relative;
-  display: flex;
-  align-items: center;
-  padding: 2px 12px 10px;
   flex-shrink: 0;
 }
 .settings-subheader .settings-header-title {

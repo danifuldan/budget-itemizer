@@ -291,7 +291,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     return (
       <div className="settings-view">
         <TitlebarRegion />
-        <div className="settings-subheader">
+        <div className="review-toolbar settings-subheader">
           <button className="btn-ghost" onClick={onBack}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10 3L5 8l5 5" />
@@ -324,7 +324,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     />
     <div className="settings-view">
       <TitlebarRegion />
-      <div className="settings-subheader">
+      <div className="review-toolbar settings-subheader">
         <button className="btn-ghost" onClick={onBack}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 3L5 8l5 5" />
