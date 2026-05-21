@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Budget Itemizer",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "identifier": "com.budget-itemizer.desktop",
   "build": {
     "frontendDist": "../dist",
