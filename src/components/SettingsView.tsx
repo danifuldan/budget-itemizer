@@ -147,7 +147,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
 
   const actualTest = useActualTest({
     initialServerUrl: config.actualServerUrl || "",
-    initialPasswordPlaceholder: "•".repeat(config.actualPasswordLength || 0),
+    initialPasswordPlaceholder: "",
     onTested: async (result, budgets) => {
       if (!result.success || budgets.length === 0) return;
       setActualBudgetList(budgets);
@@ -439,7 +439,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                   autoComplete="current-password"
                   value={actualTest.state.password}
                   onChange={(e) => actualTest.setPassword(e.target.value)}
-                  placeholder="Enter your Actual server password"
+                  placeholder={config.actualPasswordLength ? "•".repeat(config.actualPasswordLength) : "Enter your Actual server password"}
                 />
               </div>
               <div className="test-connection">
