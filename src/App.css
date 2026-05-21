@@ -2178,11 +2178,29 @@ body::after {
   color: var(--text-1);
 }
 
-/* Settings titlebar right-aligns its contents (back button + title)
-   per the per-screen layout preference. Scoped so other views' titlebars
-   keep their default left layout. */
+/* Settings titlebar: "Settings" centered across the full window, back
+   button pinned to the top-right. The title is absolutely positioned
+   against .titlebar-region (made relative below) so it spans the FULL
+   width INCLUDING the 70px macOS traffic-light spacer — that's what
+   keeps it window-centered rather than centered only in the content
+   area (which would sit ~35px right of true center). pointer-events:none
+   lets window-drag and back-button clicks pass through the title.
+   Scoped to .settings-view so other views' titlebars keep their default
+   left-aligned layout. */
+.settings-view .titlebar-region {
+  position: relative;
+}
 .settings-view .titlebar-content {
   justify-content: flex-end;
+}
+.settings-view .settings-header-title {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .settings-section {
