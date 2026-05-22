@@ -27,6 +27,12 @@ execFileSync(
     "--target=node20",
     "--format=cjs",
     "--outfile=dist-server/server.cjs",
+    // @actual-app/api ships as real node_modules in the .app (its native
+    // better-sqlite3 .node can't live in the pkg snapshot). This define
+    // makes services/budget-actual.ts dead-code-eliminate its dev
+    // `import("@actual-app/api")`, so the SDK + better-sqlite3 are NOT
+    // bundled; the pkg binary requires them from the shipped real path.
+    '--define:process.env.PKG_BUNDLED="1"',
     // services/{llama-server,swift-sidecar}.ts intentionally use the
     // ESM `import.meta.url` with a runtime `typeof === "string"` guard
     // and a `__dirname` fallback so the same source runs in vitest

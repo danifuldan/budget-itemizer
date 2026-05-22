@@ -15,14 +15,39 @@ import {
 // Actual Budget stores some names with non-breaking spaces (U+00A0) — normalize to regular spaces
 const normalizeSpaces = (s: string) => s.replace(/\u00A0/g, " ");
 
-// @actual-app/api expects browser globals — polyfill before first import
-let _api: typeof import("@actual-app/api") | null = null;
-const loadApi = async () => {
+// @actual-app/api expects browser globals — polyfill before first import.
+//
+// @actual-app/api is NOT bundled into the pkg single-file binary: it pulls
+// in better-sqlite3 (a native .node addon that can't live in the pkg
+// snapshot — `bindings` searches the real fs) and loads migrations +
+// default-db.sqlite from disk via __dirname. So it ships as REAL
+// node_modules in the .app and is required from a real path at runtime.
+// The eval() forms below keep the specifier opaque to BOTH esbuild and
+// pkg so neither inlines it (which would drag better-sqlite3 back into
+// the snapshot). In dev (tsx/ESM) it's a normal dynamic import from
+// node_modules. REAL_MODULES overrides the location for build:server
+// testing without the full .app.
+type ActualApi = typeof import("@actual-app/api");
+let _api: ActualApi | null = null;
+const loadApi = async (): Promise<ActualApi> => {
   if (_api) return _api;
   if (typeof globalThis.navigator === "undefined") {
     (globalThis as unknown as { navigator: { platform: string; userAgent: string } }).navigator = { platform: "linux", userAgent: "" };
   }
-  _api = await import("@actual-app/api");
+  // PKG_BUNDLED is defined ("1") only by build-server.mjs's esbuild step.
+  // In the pkg binary that branch is live; esbuild dead-code-eliminates
+  // the dev `import("@actual-app/api")` below so it never lands in the
+  // snapshot (which would drag better-sqlite3 back in). In dev/tests
+  // PKG_BUNDLED is undefined → the static import runs and vitest can mock it.
+  if (process.env.PKG_BUNDLED) {
+    const realModules =
+      process.env.REAL_MODULES ||
+      path.join(path.dirname(process.execPath), "..", "Resources", "server-modules", "node_modules");
+    const realRequire = eval("require") as NodeRequire;
+    _api = realRequire(path.join(realModules, "@actual-app", "api")) as ActualApi;
+  } else {
+    _api = await import("@actual-app/api");
+  }
   return _api;
 };
 
