@@ -3,8 +3,8 @@
 // 2. @yao-pkg/pkg compiles CJS → standalone Node binary
 
 import { execFileSync } from "child_process";
-import { mkdirSync, existsSync, createWriteStream, readFileSync, writeFileSync, unlinkSync, readdirSync, copyFileSync, chmodSync, rmSync } from "fs";
-import { resolve, dirname, join } from "path";
+import { mkdirSync, existsSync, createWriteStream, readFileSync, writeFileSync, unlinkSync, readdirSync, copyFileSync, chmodSync, rmSync, cpSync } from "fs";
+import { resolve, dirname, join, relative, sep } from "path";
 import { fileURLToPath } from "url";
 import { pipeline } from "stream/promises";
 import { createHash } from "crypto";
@@ -153,23 +153,31 @@ if (existsSync(swiftDest)) {
 // services/budget-actual.ts loadApi() requires the SDK from a real on-disk
 // path: Contents/Resources/server-modules/node_modules (relative to the
 // sidecar's Contents/MacOS/ via process.execPath). We materialize that real
-// tree here; Tauri copies it verbatim via bundle.resources. Shipping only
-// production deps (--omit=dev) keeps the tree small. Pinned to the exact
-// version dev/tests resolve so the shipped SDK == the tested SDK.
+// tree here; Tauri copies it verbatim via bundle.resources.
+//
+// The tree is COPIED from the lockfile-pinned root node_modules — NOT a fresh
+// `npm install` — so the shipped SDK + native engine are byte-identical to the
+// versions dev and the unit suite run against. A floating install
+// (`--no-package-lock`) silently shipped better-sqlite3 12.10.0 while the
+// root lockfile pinned 12.8.0: the packaged app ran a different native SQLite
+// engine than every test. Copying from root makes the root package-lock.json
+// the single source of truth — dev == shipped by construction, no drift, no
+// second lockfile to keep in sync.
 const serverModulesDir = resolve(__dirname, "src-tauri/server-modules");
 const shippedModules = resolve(serverModulesDir, "node_modules");
 const shippedActualPkgJson = resolve(shippedModules, "@actual-app/api/package.json");
+const rootModules = resolve(__dirname, "node_modules");
 
-const desiredActualVersion = JSON.parse(
-  readFileSync(resolve(__dirname, "node_modules/@actual-app/api/package.json"), "utf8"),
-).version;
+const readPkgVersion = (dir) =>
+  JSON.parse(readFileSync(resolve(dir, "package.json"), "utf8")).version;
+const desiredActualVersion = readPkgVersion(resolve(rootModules, "@actual-app", "api"));
+const rootBetterSqliteVersion = readPkgVersion(resolve(rootModules, "better-sqlite3"));
 
-// Bug-1 guard: better-sqlite3's native .node is compiled by THIS npm install
-// against the build machine's Node ABI, but at runtime it's loaded by the Node
-// that @yao-pkg/pkg embeds — the `target` major from Step 2 (node20-... -> 20).
-// If the build Node's major differs, the .node is the wrong ABI and the
-// packaged app can't open Actual budgets (NODE_MODULE_VERSION). Fail at build
-// time with a fix, not at user-click time.
+// Bug-1 guard: better-sqlite3's native .node (in root) was compiled against the
+// build machine's Node ABI, but at runtime it's loaded by the Node @yao-pkg/pkg
+// embeds — the `target` major from Step 2 (node20-... -> 20). If the build
+// Node's major differs, the .node is the wrong ABI and the packaged app can't
+// open Actual budgets (NODE_MODULE_VERSION). Fail at build time, not at click.
 const pkgTargetNodeMajor = Number(/^node(\d+)/.exec(target)?.[1]);
 const buildNodeMajor = Number(process.versions.node.split(".")[0]);
 if (pkgTargetNodeMajor && buildNodeMajor !== pkgTargetNodeMajor) {
@@ -180,39 +188,77 @@ if (pkgTargetNodeMajor && buildNodeMajor !== pkgTargetNodeMajor) {
   );
 }
 
-// Cache key = SDK version + Node ABI, recorded in a build marker beside (not
-// inside) node_modules so it isn't shipped. Version ALONE is insufficient: a
-// Node upgrade that changes the ABI without changing the SDK version would
-// otherwise reuse a stale, wrong-ABI .node (Bug 1).
+// Cache key = SDK version + better-sqlite3 version (both from root) + Node ABI,
+// recorded in a build marker beside (not inside) node_modules so it isn't
+// shipped. Including the native dep's root version means a lockfile bump that
+// moves better-sqlite3 busts the cache and re-copies; ABI guards a Node bump.
 const buildMarkerPath = resolve(serverModulesDir, ".build-marker.json");
-const wantMarker = { version: desiredActualVersion, abi: process.versions.modules };
+const wantMarker = { version: desiredActualVersion, betterSqlite: rootBetterSqliteVersion, abi: process.versions.modules };
 const haveMarker = existsSync(buildMarkerPath) && existsSync(shippedActualPkgJson)
   ? JSON.parse(readFileSync(buildMarkerPath, "utf8"))
   : null;
+const markerMatches = haveMarker
+  && haveMarker.version === wantMarker.version
+  && haveMarker.betterSqlite === wantMarker.betterSqlite
+  && haveMarker.abi === wantMarker.abi;
 
-if (haveMarker && haveMarker.version === wantMarker.version && haveMarker.abi === wantMarker.abi) {
-  console.log(`@actual-app/api ${desiredActualVersion} (ABI ${wantMarker.abi}) already shipped, skipping install.`);
+if (markerMatches) {
+  console.log(`@actual-app/api ${desiredActualVersion} + better-sqlite3 ${rootBetterSqliteVersion} (ABI ${wantMarker.abi}) already shipped, skipping copy.`);
 } else {
-  console.log(`Installing @actual-app/api ${desiredActualVersion} (production deps only) for the .app...`);
+  console.log(`Copying @actual-app/api ${desiredActualVersion} production closure from the pinned root tree...`);
   rmSync(serverModulesDir, { recursive: true, force: true });
-  mkdirSync(serverModulesDir, { recursive: true });
-  // npm install into a prefix: creates <prefix>/node_modules with the package
-  // and its production deps. --omit=dev drops the tree's devDependencies;
-  // --no-package-lock/--no-audit/--no-fund keep it lean and quiet. argv form
-  // (no shell string) per the project's no-shell discipline (.semgrep).
-  execFileSync(
-    "npm",
-    [
-      "install", `@actual-app/api@${desiredActualVersion}`,
-      "--omit=dev", "--no-package-lock", "--no-audit", "--no-fund",
-      "--prefix", serverModulesDir,
-    ],
-    { stdio: "inherit", cwd: __dirname },
-  );
-  // npm writes a package.json into the prefix; we overwrite it below with a
-  // deterministic manifest for the `npm ls` completeness check. Both it and the
-  // build marker are siblings of node_modules, and only node_modules ships, so
-  // neither reaches the .app.
+  mkdirSync(shippedModules, { recursive: true });
+
+  // Resolve a dep the way Node does: from the requiring package's dir, check
+  // its OWN node_modules first, then climb ancestors (skipping node_modules
+  // segments) up to the project root — nearest wins. This mirrors npm's
+  // hoisting so a version-conflicted NESTED dep resolves to the correct copy
+  // (e.g. @actual-app/crdt needs uuid@9 nested while the top-level is uuid@13)
+  // instead of grabbing the top-level version that belongs to another consumer.
+  const resolveDep = (name, fromPkgDir) => {
+    let dir = fromPkgDir;
+    while (dir.length >= __dirname.length) {
+      if (dir.split(sep).pop() !== "node_modules") {
+        const cand = resolve(dir, "node_modules", name);
+        if (existsSync(resolve(cand, "package.json"))) return cand;
+      }
+      if (dir === __dirname) break;
+      dir = dirname(dir);
+    }
+    return null;
+  };
+
+  // Walk @actual-app/api's PRODUCTION closure (dependencies + optional). Keyed
+  // by physical path relative to rootModules so nested (version-conflicted)
+  // copies keep their exact layout. A dep this walk misses is caught by the
+  // `npm ls --all` completeness gate below (build fails loud) — never shipped.
+  const closure = new Map(); // rel-path-from-rootModules -> absolute source dir
+  const visit = (pkgDir) => {
+    let pj;
+    try { pj = JSON.parse(readFileSync(resolve(pkgDir, "package.json"), "utf8")); } catch { return; }
+    const deps = { ...(pj.dependencies || {}), ...(pj.optionalDependencies || {}) };
+    for (const name of Object.keys(deps)) {
+      const depDir = resolveDep(name, pkgDir);
+      if (!depDir) continue; // optional absent — completeness gate catches required misses
+      const rel = relative(rootModules, depDir);
+      if (closure.has(rel)) continue;
+      closure.set(rel, depDir);
+      visit(depDir);
+    }
+  };
+  const apiDir = resolve(rootModules, "@actual-app", "api");
+  closure.set(relative(rootModules, apiDir), apiDir);
+  visit(apiDir);
+
+  for (const [rel, depDir] of closure) {
+    cpSync(depDir, resolve(shippedModules, rel), {
+      recursive: true,
+      // Skip each package's nested node_modules — those are separate closure
+      // entries copied at their own rel path, so this prevents double-copy.
+      filter: (src) => !relative(depDir, src).split(sep).includes("node_modules"),
+    });
+  }
+  console.log(`Copied ${closure.size} package(s) from the pinned root tree.`);
 }
 
 // Prune build-time-only and symlinked cruft before bundling. This runs every
@@ -336,4 +382,4 @@ execFileSync(process.execPath, ["-e", smoke], { env: { ...process.env, SM: shipp
 // load all passed, so an interrupted build never leaves a marker that
 // greenlights a bad tree.
 writeFileSync(buildMarkerPath, JSON.stringify(wantMarker, null, 2));
-console.log(`✓ shipped tree verified (npm ls + load) + marker written (v${wantMarker.version}, ABI ${wantMarker.abi}).`);
+console.log(`✓ shipped tree verified (npm ls + load) + marker written (api ${wantMarker.version}, better-sqlite3 ${wantMarker.betterSqlite}, ABI ${wantMarker.abi}).`);
