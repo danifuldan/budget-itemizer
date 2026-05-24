@@ -217,3 +217,31 @@ export const resetBudgetProvider = async () => {
   _cached = null;
   _cachedType = "";
 };
+
+// Config fields whose change must drop the cached provider/SDK so the next
+// call re-inits against the new config. Editing e.g. actualServerUrl after a
+// successful connect otherwise leaves the module-level SDK pinned to the old
+// URL/creds until app restart (the connection state is module-level, shared
+// across `new ActualBudgetProvider()` instances). Centralized so every route
+// that persists config — `/config` AND `/setup/save` — resets on the same
+// fields and can't drift (they did: /config reset, /setup/save didn't).
+export const PROVIDER_AFFECTING_FIELDS = [
+  "budgetProvider",
+  "actualServerUrl",
+  "actualPassword",
+  "actualSyncId",
+  "ynabApiKey",
+  "ynabBudgetId",
+] as const;
+
+export const isProviderAffectingUpdate = (
+  updates: Record<string, unknown>,
+): boolean => PROVIDER_AFFECTING_FIELDS.some((k) => k in updates);
+
+/** Drop the cached provider iff `updates` touches a provider-identity or
+ *  credential field. Call from every route that persists config. */
+export const resetBudgetProviderIfAffected = async (
+  updates: Record<string, unknown>,
+): Promise<void> => {
+  if (isProviderAffectingUpdate(updates)) await resetBudgetProvider();
+};

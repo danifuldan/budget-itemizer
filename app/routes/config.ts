@@ -68,16 +68,10 @@ config.post("/", auth, zValidator("json", configUpdateSchema), async (c) => {
     // the cached SDK. Without this, editing actualServerUrl after a
     // successful first connect leaves the SDK pinned to the old URL
     // until app restart — Settings says "saved" but the next call still
-    // hits the old server. Same for password/syncId/ynab token/budget.
-    const PROVIDER_AFFECTING = [
-      "budgetProvider",
-      "actualServerUrl", "actualPassword", "actualSyncId",
-      "ynabApiKey", "ynabBudgetId",
-    ] as const;
-    if (PROVIDER_AFFECTING.some((k) => k in updates)) {
-      const { resetBudgetProvider } = await import("../../services/budget-provider");
-      await resetBudgetProvider();
-    }
+    // hits the old server. Shared with /setup/save via the same helper so
+    // the two routes can't drift on which fields trigger a reset.
+    const { resetBudgetProviderIfAffected } = await import("../../services/budget-provider");
+    await resetBudgetProviderIfAffected(updates);
     // Capture the setup-complete state before the write so we can detect
     // the false→true transition below. index.ts main() only auto-starts
     // the watcher at boot; if setup was incomplete then (fresh install

@@ -37,6 +37,8 @@ import {
   buildSubtransactionSplits,
   getBudgetProvider,
   resetBudgetProvider,
+  resetBudgetProviderIfAffected,
+  isProviderAffectingUpdate,
   BudgetConnectionError,
   vendorMatches,
   splitsSimilarity,
@@ -108,6 +110,52 @@ describe("resetBudgetProvider", () => {
 
   it("does not throw when no provider is cached", async () => {
     await expect(resetBudgetProvider()).resolves.toBeUndefined();
+  });
+});
+
+// Premortem Bug 2: /config reset the cached SDK on a credential change but
+// /setup/save did not, so re-running setup and changing the Actual server
+// URL/password left the SDK pinned to the old creds until app restart. Both
+// routes now go through resetBudgetProviderIfAffected; these pin the field
+// list and the reset behavior.
+describe("resetBudgetProviderIfAffected", () => {
+  it("isProviderAffectingUpdate flags provider/credential fields, nothing else", () => {
+    for (const f of [
+      "budgetProvider", "actualServerUrl", "actualPassword",
+      "actualSyncId", "ynabApiKey", "ynabBudgetId",
+    ]) {
+      expect(isProviderAffectingUpdate({ [f]: "x" })).toBe(true);
+    }
+    // Non-credential fields (incl. the shared account fields) must NOT reset.
+    for (const f of [
+      "inboxPath", "processedPath", "watcherEnabled", "discountMode",
+      "hiddenAccounts", "defaultAccount", "ynabAccountId", "minimizeToTray",
+    ]) {
+      expect(isProviderAffectingUpdate({ [f]: "x" })).toBe(false);
+    }
+    expect(isProviderAffectingUpdate({})).toBe(false);
+  });
+
+  it("resets the cached provider when a credential field changes", async () => {
+    mockedGetConfig.mockReturnValue({} as any);
+    const provider = getBudgetProvider();
+    const shutdownSpy = vi.spyOn(provider, "shutdown");
+
+    await resetBudgetProviderIfAffected({ actualServerUrl: "https://new:5006" });
+
+    expect(shutdownSpy).toHaveBeenCalled();
+    expect(getBudgetProvider()).not.toBe(provider); // fresh instance next call
+  });
+
+  it("does NOT reset when only non-credential fields change", async () => {
+    mockedGetConfig.mockReturnValue({} as any);
+    const provider = getBudgetProvider();
+    const shutdownSpy = vi.spyOn(provider, "shutdown");
+
+    await resetBudgetProviderIfAffected({ inboxPath: "/tmp/x", watcherEnabled: true });
+
+    expect(shutdownSpy).not.toHaveBeenCalled();
+    expect(getBudgetProvider()).toBe(provider); // same cached instance
   });
 });
 

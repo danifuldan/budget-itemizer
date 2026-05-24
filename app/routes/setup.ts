@@ -57,6 +57,12 @@ setup.post(
   async (c) => {
     const updates = c.req.valid("json") as Record<string, unknown>;
     const config = await saveConfig(updates as any);
+    // Same provider-reset as /config: re-running setup and changing Actual
+    // creds here must drop the cached SDK, or the next call stays pinned to
+    // the old server/creds until app restart. (/config had this; /setup/save
+    // didn't — the asymmetry this shares away.)
+    const { resetBudgetProviderIfAffected } = await import("../../services/budget-provider");
+    await resetBudgetProviderIfAffected(updates);
     return c.json({ success: true, config }, 200);
   }
 );
