@@ -223,7 +223,26 @@ export class ActualBudgetProvider implements BudgetProvider {
     await ensureServer();
     const api = await loadApi();
     const budgets = await api.getBudgets();
-    return budgets.map((b) => ({ id: (b as { groupId?: string; syncId?: string; id?: string }).groupId || (b as { syncId?: string }).syncId || b.id || "", name: b.name }));
+    // api.getBudgets() lists each budget once per *presence state*, not once
+    // per budget: a local entry (downloaded into DATA_DIR — has an on-disk
+    // `id` like "My-Finances-0007c45", no `state`) AND a `state: "remote"`
+    // entry for the same budget on the server. Both carry the same `groupId`
+    // — which is the sync id we persist in config.actualSyncId and pass to
+    // downloadBudget(). Collapse on that identity so the Settings dropdown
+    // shows one row per budget, not one per local/remote copy. The exposed
+    // `id` MUST stay the groupId (never the on-disk `id`): selecting a row
+    // writes it to actualSyncId, and downloadBudget only accepts the syncId.
+    const byId = new Map<string, { id: string; name: string }>();
+    for (const b of budgets) {
+      const id =
+        (b as { groupId?: string; syncId?: string; id?: string }).groupId ||
+        (b as { syncId?: string }).syncId ||
+        b.id ||
+        "";
+      if (!id || byId.has(id)) continue;
+      byId.set(id, { id, name: b.name });
+    }
+    return [...byId.values()];
   }
 
   async findMatchingTransaction(

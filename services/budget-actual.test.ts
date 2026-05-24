@@ -149,6 +149,32 @@ describe("ActualBudgetProvider", () => {
     });
   });
 
+  describe("getAllBudgets", () => {
+    // api.getBudgets() returns each budget once as a downloaded LOCAL file
+    // (on-disk `id`, no `state`) and once as a `state:"remote"` server file;
+    // both share the same groupId. The dropdown must show one row per budget.
+    it("collapses the local + remote copies of one budget into a single row", async () => {
+      mockApi.getBudgets.mockResolvedValue([
+        // local (downloaded) — on-disk id, no `state`
+        { id: "My-Finances-0007c45", cloudFileId: "dcf86b25", groupId: "697f180e", name: "My Finances" },
+        { id: "Reboot-Budget-da54ded", cloudFileId: "7ac1775b", groupId: "34ec2039", name: "Budget" },
+        // remote — same groupId, state:"remote", no on-disk id
+        { cloudFileId: "7ac1775b", state: "remote", groupId: "34ec2039", name: "Budget" },
+        { cloudFileId: "dcf86b25", state: "remote", groupId: "697f180e", name: "My Finances" },
+      ] as any);
+
+      const budgets = await provider.getAllBudgets();
+
+      // One row per identity, local-first order preserved, and the exposed
+      // id is the groupId (the syncId) — NOT the on-disk "My-Finances-0007c45",
+      // which would be written to config.actualSyncId and break downloadBudget.
+      expect(budgets).toEqual([
+        { id: "697f180e", name: "My Finances" },
+        { id: "34ec2039", name: "Budget" },
+      ]);
+    });
+  });
+
   describe("findMatchingTransaction", () => {
     it("returns match by amount + vendor + date", async () => {
       mockApi.getAccounts.mockResolvedValue([
