@@ -188,6 +188,8 @@ scrapers/state.json
 # Tauri build artifacts
 src-tauri/target/
 src-tauri/binaries/
+# Actual SDK production tree materialized by build-server.mjs (Step 5)
+src-tauri/server-modules/
 
 # Server build intermediate
 dist-server/

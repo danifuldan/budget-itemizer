@@ -45,7 +45,8 @@
       "binaries/swift-sidecar"
     ],
     "resources": [
-      "binaries/*.dylib"
+      "binaries/*.dylib",
+      "server-modules/node_modules"
     ]
   },
   "plugins": {
