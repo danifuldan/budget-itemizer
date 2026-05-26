@@ -8,6 +8,7 @@ import { resolve, dirname, join, relative, sep } from "path";
 import { fileURLToPath } from "url";
 import { pipeline } from "stream/promises";
 import { createHash } from "crypto";
+import { builtinModules } from "module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(__dirname, "src-tauri/binaries");
@@ -188,19 +189,29 @@ if (pkgTargetNodeMajor && buildNodeMajor !== pkgTargetNodeMajor) {
   );
 }
 
-// Cache key = SDK version + better-sqlite3 version (both from root) + Node ABI,
-// recorded in a build marker beside (not inside) node_modules so it isn't
-// shipped. Including the native dep's root version means a lockfile bump that
-// moves better-sqlite3 busts the cache and re-copies; ABI guards a Node bump.
+// Cache key = SDK version + better-sqlite3 version + Node ABI + a hash of the
+// root package-lock.json, recorded in a build marker beside (not inside)
+// node_modules so it isn't shipped. The lockfile hash is the load-bearing
+// part: the shipped tree's RUNTIME externals are NOT just better-sqlite3 — the
+// SDK bundle also require()s handlebars / chevrotain / sax / xmlbuilder / retry
+// / err-code / source-map, none of which were in the old key. Keying only on
+// api+better-sqlite3 let a transitive bump (security patch, `npm update`,
+// `^`-range re-resolution) ship a STALE copy on an incremental build — the
+// exact drift this step exists to kill. Any lockfile change now busts the cache
+// and re-copies; ABI still guards a Node bump.
+const lockHash = createHash("sha256")
+  .update(readFileSync(resolve(__dirname, "package-lock.json")))
+  .digest("hex").slice(0, 16);
 const buildMarkerPath = resolve(serverModulesDir, ".build-marker.json");
-const wantMarker = { version: desiredActualVersion, betterSqlite: rootBetterSqliteVersion, abi: process.versions.modules };
+const wantMarker = { version: desiredActualVersion, betterSqlite: rootBetterSqliteVersion, abi: process.versions.modules, lock: lockHash };
 const haveMarker = existsSync(buildMarkerPath) && existsSync(shippedActualPkgJson)
   ? JSON.parse(readFileSync(buildMarkerPath, "utf8"))
   : null;
 const markerMatches = haveMarker
   && haveMarker.version === wantMarker.version
   && haveMarker.betterSqlite === wantMarker.betterSqlite
-  && haveMarker.abi === wantMarker.abi;
+  && haveMarker.abi === wantMarker.abi
+  && haveMarker.lock === wantMarker.lock;
 
 if (markerMatches) {
   console.log(`@actual-app/api ${desiredActualVersion} + better-sqlite3 ${rootBetterSqliteVersion} (ABI ${wantMarker.abi}) already shipped, skipping copy.`);
@@ -368,15 +379,56 @@ try {
     "The packaged app would fail to open Actual budgets. Run `rm -rf src-tauri/server-modules` and rebuild.",
   );
 }
+// Derive the bundle's RUNTIME externals straight from the shipped dist — the
+// bare specifiers @actual-app/api require()s that aren't inlined into its
+// webpack bundle. A top-level `require("@actual-app/api")` loads only the
+// barrel + better-sqlite3 (~2 of the ~8 externals); the rest
+// (chevrotain / err-code / handlebars / retry / sax / source-map / xmlbuilder)
+// are reached only on the sync / import / report paths, which no gate
+// exercises. `npm ls --all` above proves they're PRESENT (declared), not that
+// they LOAD. Requiring each below turns a present-but-unloadable external — or
+// a NEW one a future SDK bump introduces — into a build failure instead of a
+// crash on the user's first Actual import. Derived (not hardcoded) so the list
+// can't silently fall out of date.
+const collectRuntimeExternals = (distDir) => {
+  const found = new Set();
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!/\.(js|cjs|mjs)$/.test(e.name)) continue;
+      const re = /require\(\s*["']([^"'.][^"')]*)["']\s*\)/g;
+      const src = readFileSync(full, "utf8");
+      let m;
+      while ((m = re.exec(src))) {
+        const spec = m[1];
+        if (spec.startsWith("node:")) continue;
+        const parts = spec.split("/");
+        const name = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+        if (name && !builtinModules.includes(name)) found.add(name);
+      }
+    }
+  };
+  walk(distDir);
+  return [...found].sort();
+};
+const runtimeExternals = collectRuntimeExternals(resolve(shippedModules, "@actual-app", "api", "dist"));
 const smoke = [
   'globalThis.navigator = globalThis.navigator || { platform: "", userAgent: "" };',
   'const path = require("path"); const M = process.env.SM;',
+  // Barrel load — catches a broken/partial @actual-app/api bundle. (Preserved
+  // from the prior smoke; the derived-externals loop below does NOT cover it,
+  // since the api package isn't one of its own require() targets.)
   'require(path.join(M, "@actual-app", "api"));',
+  'for (const name of JSON.parse(process.env.EXT)) {',
+  '  try { require(path.join(M, ...name.split("/"))); }',
+  '  catch (e) { throw new Error("runtime external failed to load from shipped tree: " + name + " — " + e.message); }',
+  '}',
   'const Database = require(path.join(M, "better-sqlite3"));',
   'const db = new Database(":memory:"); db.exec("create table t(x)"); db.close();',
 ].join("\n");
-console.log("Verifying the shipped tree loads (require @actual-app/api + open better-sqlite3)...");
-execFileSync(process.execPath, ["-e", smoke], { env: { ...process.env, SM: shippedModules }, stdio: "inherit" });
+console.log(`Verifying the shipped tree loads (require ${runtimeExternals.length} runtime externals + open better-sqlite3): ${runtimeExternals.join(", ")}`);
+execFileSync(process.execPath, ["-e", smoke], { env: { ...process.env, SM: shippedModules, EXT: JSON.stringify(runtimeExternals) }, stdio: "inherit" });
 
 // Record the cache marker only after install + prune + sign + completeness +
 // load all passed, so an interrupted build never leaves a marker that
