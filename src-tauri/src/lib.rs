@@ -255,7 +255,14 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                // Menu-bar icon is a monochrome template (alpha-only): macOS
+                // tints it from the alpha mask — white in dark menu bars, dark
+                // in light ones. Embedded at compile time so there's no runtime
+                // path dependency. NOT default_window_icon(): the app icon is a
+                // colored squircle whose alpha is the whole tile, so as a
+                // template it would tint into a solid blob.
+                .icon(tauri::include_image!("icons/tray.png"))
+                .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
