@@ -5,15 +5,24 @@
 // broken auto-update was indistinguishable from success. The policy is
 // now pure + exported so it's deterministically testable without the
 // Tauri runtime; the hook is thin glue over these.
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 import {
   classifyError,
   outcomeForCheck,
   persist,
   loadPersisted,
+  useAppUpdate,
   STORAGE_KEY,
+  CHECK_INTERVAL_MS,
   type LastCheck,
 } from "./useAppUpdate";
+
+// The hook dynamic-imports these; mock them so renderHook works without the
+// Tauri runtime. vi.hoisted lets the (hoisted) vi.mock factory reach the spy.
+const { updaterCheck } = vi.hoisted(() => ({ updaterCheck: vi.fn() }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => updaterCheck() }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 
 beforeEach(() => localStorage.clear());
 
@@ -65,6 +74,41 @@ describe("outcomeForCheck", () => {
       outcome: "available",
       version: "0.3.2",
     });
+  });
+});
+
+describe("periodic re-check (tray-resident freshness)", () => {
+  beforeEach(() => {
+    updaterCheck.mockReset();
+    updaterCheck.mockResolvedValue({ available: false });
+  });
+
+  // Spy on the timer lifecycle directly — deterministic, with no fake-timer /
+  // async-flush race. Verifies the two halves that matter: an interval is
+  // armed at the documented cadence, AND it's cleared on unmount so it can't
+  // outlive the hook ("cleanup that no longer runs").
+  it("arms a CHECK_INTERVAL_MS re-check and clears THAT interval on unmount", async () => {
+    const setSpy = vi.spyOn(globalThis, "setInterval");
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const { unmount } = renderHook(() => useAppUpdate());
+
+      const idx = setSpy.mock.calls.findIndex(([, ms]) => ms === CHECK_INTERVAL_MS);
+      expect(idx, "no setInterval armed at CHECK_INTERVAL_MS").toBeGreaterThanOrEqual(0);
+      expect(typeof setSpy.mock.calls[idx][0]).toBe("function");
+      const intervalId = setSpy.mock.results[idx].value;
+
+      // Fails if clearInterval is ever dropped — the timer would leak past
+      // the hook's life and keep firing checks forever.
+      unmount();
+      expect(clearSpy).toHaveBeenCalledWith(intervalId);
+
+      // Settle the fire-and-forget boot check so it doesn't log act() noise.
+      await act(async () => { await Promise.resolve(); });
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 });
 

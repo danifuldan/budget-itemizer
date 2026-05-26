@@ -39,6 +39,12 @@ export interface LastCheck {
 
 export const STORAGE_KEY = "bi.updater.lastCheck";
 
+/** Re-check cadence while the app is running. This is a tray-resident
+ *  background app, so "on launch" can be weeks apart; a periodic check
+ *  keeps the gear's update dot current within a long session. Exported so
+ *  the test asserts against it instead of a magic number. */
+export const CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 min
+
 /** Pure: outcome for a (possibly absent) updater result. A reachable
  *  check that reports nothing newer is the ONLY "up-to-date". */
 export function outcomeForCheck(
@@ -161,10 +167,16 @@ export function useAppUpdate() {
     }
   }, []);
 
-  // Boot-time check, silent on failure (no scary banner). Still records
-  // lastCheck so the outcome is always diagnosable.
+  // Boot-time check + periodic re-check, both silent on failure (no scary
+  // banner) but still recording lastCheck for diagnosis. Tray-resident app
+  // ⇒ relaunches are rare, so without the interval the gear's update dot
+  // would sit stale for a whole session. The interval is created AND cleared
+  // in this one effect so it can't outlive the hook (the "cleanup that no
+  // longer runs" failure mode).
   useEffect(() => {
     void runCheck(false);
+    const id = setInterval(() => { void runCheck(false); }, CHECK_INTERVAL_MS);
+    return () => clearInterval(id);
   }, [runCheck]);
 
   return { available, checking, installing, error, lastCheck, check, installAndRestart };
