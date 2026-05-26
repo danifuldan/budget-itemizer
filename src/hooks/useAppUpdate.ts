@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 /** Auto-update integration via `tauri-plugin-updater`.
  *
@@ -167,16 +167,51 @@ export function useAppUpdate() {
     }
   }, []);
 
-  // Boot-time check + periodic re-check, both silent on failure (no scary
-  // banner) but still recording lastCheck for diagnosis. Tray-resident app
-  // ⇒ relaunches are rare, so without the interval the gear's update dot
-  // would sit stale for a whole session. The interval is created AND cleared
-  // in this one effect so it can't outlive the hook (the "cleanup that no
-  // longer runs" failure mode).
+  // Mirror `installing` into a ref so the periodic + focus callbacks below
+  // can read its current value without taking `installing` as an effect
+  // dep — which would tear down and recreate the interval/listener on
+  // every install toggle. Premortem 2026-05-26 Bug 2: without this gate, a
+  // 30-min tick (or a focus re-check) that lands inside `installAndRestart`
+  // races the install (concurrent check() + a UI flicker mid-install,
+  // worst-case interrupted download).
+  const installingRef = useRef(false);
+  useEffect(() => { installingRef.current = installing; }, [installing]);
+
+  // Boot-time check + periodic re-check + focus re-check — all silent on
+  // failure (no scary banner) but recording lastCheck for diagnosis.
+  // Tray-resident app ⇒ relaunches are rare, so without the interval the
+  // gear's update dot would sit stale for a whole session. The interval +
+  // focus listener are armed AND cleaned up in this one effect so the
+  // cleanup can't get separated from the registration ("cleanup that no
+  // longer runs"). Periodic + focus together cover the App Nap case
+  // (premortem 2026-05-26 Bug 1): macOS can suspend a backgrounded
+  // renderer's event loop for arbitrary durations, freezing the interval
+  // exactly when the user is AFK — focus deterministically refreshes the
+  // dot the moment they come back, throttled by `lastCheck.at` so it
+  // can't run more than once per CHECK_INTERVAL_MS no matter how often
+  // the window is focused.
   useEffect(() => {
     void runCheck(false);
-    const id = setInterval(() => { void runCheck(false); }, CHECK_INTERVAL_MS);
-    return () => clearInterval(id);
+    const id = setInterval(() => {
+      if (!installingRef.current) void runCheck(false);
+    }, CHECK_INTERVAL_MS);
+
+    const onFocus = () => {
+      if (installingRef.current) return;
+      // Read from localStorage (the persisted source of truth) instead of
+      // a closure over `lastCheck` state — avoids a stale-closure race
+      // between an in-flight runCheck() that hasn't called setLastCheck
+      // yet and a focus event firing on the still-old closure.
+      const last = loadPersisted();
+      const ageMs = last ? Date.now() - last.at : Infinity;
+      if (ageMs > CHECK_INTERVAL_MS) void runCheck(false);
+    };
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [runCheck]);
 
   return { available, checking, installing, error, lastCheck, check, installAndRestart };

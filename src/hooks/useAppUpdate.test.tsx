@@ -110,6 +110,33 @@ describe("periodic re-check (tray-resident freshness)", () => {
       clearSpy.mockRestore();
     }
   });
+
+  // Same spy pattern as the interval test — App Nap mitigation
+  // (premortem 2026-05-26 Bug 1) is event-driven, so we lock down the
+  // listener lifecycle the same way: armed at mount, removed with the
+  // same handler reference on unmount. Catches a future drop of
+  // removeEventListener as deterministically as the interval test
+  // catches a missing clearInterval.
+  it("registers a focus listener on mount and removes THAT handler on unmount", async () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    try {
+      const { unmount } = renderHook(() => useAppUpdate());
+
+      const idx = addSpy.mock.calls.findIndex(([type]) => type === "focus");
+      expect(idx, "no focus listener registered").toBeGreaterThanOrEqual(0);
+      const handler = addSpy.mock.calls[idx][1];
+      expect(typeof handler).toBe("function");
+
+      unmount();
+      expect(removeSpy).toHaveBeenCalledWith("focus", handler);
+
+      await act(async () => { await Promise.resolve(); });
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
 });
 
 describe("persistence (survives relaunch)", () => {

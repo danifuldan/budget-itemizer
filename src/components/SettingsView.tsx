@@ -99,12 +99,23 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // The update row is sticky-pinned at the bottom, so it's already
     // on-screen — arriving from the gear's update dot needs an attention
     // cue, not a scroll. Self-disables under prefers-reduced-motion (the
-    // global rule collapses animation duration to ~0).
-    if (scrollToSection === "update") {
+    // global rule collapses animation duration to ~0). The
+    // `appUpdate.available` gate (premortem 2026-05-26 Bug 3) guards
+    // against the race where a concurrent check completes between the
+    // gear click and this mount, clearing `available` so UpdateRow
+    // renders its status branch — both branches share #settings-update
+    // for deep-link stability, but pulsing a "Up to date" row would
+    // contradict the dot the user just clicked.
+    if (scrollToSection === "update" && appUpdate.available) {
       el.classList.add("deeplink-pulse");
       const t = setTimeout(() => el.classList.remove("deeplink-pulse"), 1600);
       return () => clearTimeout(t);
     }
+    // appUpdate.available intentionally not in deps: the pulse is a
+    // one-shot on navigation, using whichever value is current at the
+    // moment scrollToSection changes. Including it would re-scroll on
+    // every interval check that toggles availability.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToSection]);
 
   // budgetProvider is local state because it gates the dropdown
