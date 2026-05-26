@@ -2287,6 +2287,21 @@ body::after {
   font-size: 12px;
 }
 
+/* Draw-the-eye cue when arriving at the (sticky, already-visible) update row
+   via the gear's update dot (NAVIGATE settingsSection="update"). Coral pulse
+   matches --red / the gear-update-dot so the dot→row connection reads. The
+   global prefers-reduced-motion rule collapses this to a no-op. Visual is a
+   sensible default — tune the keyframes/color here. */
+.settings-update-row.deeplink-pulse {
+  animation: updateRowPulse 1.6s ease-out;
+}
+@keyframes updateRowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 106, 64, 0); }
+  20%      { box-shadow: 0 0 0 3px rgba(255, 106, 64, 0.55); }
+  40%      { box-shadow: 0 0 0 0 rgba(255, 106, 64, 0); }
+  60%      { box-shadow: 0 0 0 3px rgba(255, 106, 64, 0.55); }
+}
+
 .settings-update-text {
   color: var(--text-2);
 }

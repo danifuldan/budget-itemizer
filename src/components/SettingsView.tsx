@@ -42,7 +42,7 @@ function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }
   const { available, checking, installing, error, lastCheck, check, installAndRestart } = appUpdate;
   if (available) {
     return (
-      <div className="settings-update-row">
+      <div id="settings-update" className="settings-update-row">
         <span className="settings-update-text">
           Update available — v{available.version}
         </span>
@@ -72,7 +72,7 @@ function UpdateRow({ appUpdate }: { appUpdate: ReturnType<typeof useAppUpdate> }
   else if (lastCheck.outcome === "unreachable") status = `Couldn't reach update server (last tried ${ago(lastCheck.at)})`;
   else status = `Update check failed (last tried ${ago(lastCheck.at)})`;
   return (
-    <div className="settings-update-row">
+    <div id="settings-update" className="settings-update-row">
       <span className="settings-update-text">{status}</span>
       <button className="btn-link" onClick={check} disabled={checking}>
         {checking ? "Checking…" : "Check now"}
@@ -91,8 +91,20 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     const el = scrollToSection
       ? document.getElementById(`settings-${scrollToSection}`)
       : null;
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    else document.querySelector(".settings-scroll")?.scrollTo({ top: 0 });
+    if (!el) {
+      document.querySelector(".settings-scroll")?.scrollTo({ top: 0 });
+      return;
+    }
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // The update row is sticky-pinned at the bottom, so it's already
+    // on-screen — arriving from the gear's update dot needs an attention
+    // cue, not a scroll. Self-disables under prefers-reduced-motion (the
+    // global rule collapses animation duration to ~0).
+    if (scrollToSection === "update") {
+      el.classList.add("deeplink-pulse");
+      const t = setTimeout(() => el.classList.remove("deeplink-pulse"), 1600);
+      return () => clearTimeout(t);
+    }
   }, [scrollToSection]);
 
   // budgetProvider is local state because it gates the dropdown
