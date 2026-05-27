@@ -75,6 +75,8 @@ vi.mock("./services/watcher", () => {
     addPending: vi.fn(),
     markPendingReady: vi.fn(),
     moveToProcessed: vi.fn(),
+    disposeSourceFile: vi.fn(),
+    abortParse: vi.fn(),
     claimForImport: vi.fn(() => true),
     releaseImportClaim: vi.fn(),
     clearAllPending: vi.fn(),
@@ -86,7 +88,7 @@ import app from "./app";
 import { getAllAccounts, getAllEnvelopes } from "./services/budget";
 import { importReceiptToYnab } from "./services/receipt";
 import { saveConfig, isSetupComplete } from "./services/config";
-import { claimForImport, releaseImportClaim, getPending, removePending, clearAllPending, getWatcherStatus, stopWatcher, startWatcher, queueFile, addPending } from "./services/watcher";
+import { claimForImport, releaseImportClaim, getPending, removePending, clearAllPending, getWatcherStatus, stopWatcher, startWatcher, queueFile, addPending, disposeSourceFile } from "./services/watcher";
 import { getConfig } from "./services/config";
 import { getLlamaServerStartError } from "./services/llama-server";
 
@@ -302,6 +304,15 @@ describe("Hono app integration", () => {
   // version token: the FE supplies the token it rendered, the server
   // compares it against the current entry, and refuses on mismatch.
   it("DELETE /watcher/pending refuses when detectedAt token doesn't match (409)", async () => {
+    // Set config explicitly — prior tests in this file leak `getConfig`
+    // overrides that don't include `processedPath`, and the file-wide
+    // `beforeEach` only calls `clearAllMocks` which doesn't reset mock
+    // implementations. Tests that depend on `processedPath` must set it.
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
     vi.mocked(getPending).mockReturnValue({
       filename: "foo.pdf",
       filePath: "/inbox/foo.pdf",
@@ -318,14 +329,18 @@ describe("Hono app integration", () => {
     expect(removePending).not.toHaveBeenCalled();
   });
 
-  it("DELETE /watcher/pending succeeds when detectedAt token matches", async () => {
+  it("DELETE /watcher/pending succeeds when detectedAt token matches (moves file via disposeSourceFile)", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
     vi.mocked(getPending).mockReturnValue({
       filename: "foo.pdf",
-      filePath: "/inbox/nonexistent-foo.pdf", // unlinkSync will throw, caught by try
+      filePath: "/inbox/foo.pdf",
       detectedAt: "2026-01-01T00:00:00.000Z",
       status: "ready",
     } as any);
-    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const res = await app.request(
       "/watcher/pending/foo.pdf?detectedAt=2026-01-01T00%3A00%3A00.000Z",
@@ -333,7 +348,101 @@ describe("Hono app integration", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(disposeSourceFile).toHaveBeenCalledWith(
+      "/inbox/foo.pdf",
+      "foo.pdf",
+      "/processed/discarded",
+    );
     expect(removePending).toHaveBeenCalledWith("foo.pdf");
+  });
+
+  // Premortem 2026-05-19 Bug 3 fix: when processedPath is unset, the old
+  // route silently ran removePending+200 and left the file in the inbox →
+  // watcher re-queued it on the next poll, ghost-resurrecting the same
+  // receipt with no explanation. The "unreachable in practice" comment was
+  // wrong (it's reachable via config edits / fresh installs / settings clear).
+  it("DELETE /watcher/pending refuses (422) when processedPath is unset AND deleteAfterImport is false", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "",
+      deleteAfterImport: false,
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    vi.mocked(getPending).mockReturnValue({
+      filename: "foo.pdf",
+      filePath: "/inbox/foo.pdf",
+      detectedAt: "2026-01-01T00:00:00.000Z",
+      status: "ready",
+    } as any);
+
+    const res = await app.request(
+      "/watcher/pending/foo.pdf?detectedAt=2026-01-01T00%3A00%3A00.000Z",
+      { method: "DELETE", headers: { Authorization: authHeader } },
+    );
+
+    expect(res.status).toBe(422);
+    expect(disposeSourceFile).not.toHaveBeenCalled();
+    // Load-bearing: removePending must NOT fire — otherwise the FE
+    // optimistically removes, gets a 422, refetches, but the entry is
+    // already cleared server-side. Ghost-resurrect resumes.
+    expect(removePending).not.toHaveBeenCalled();
+  });
+
+  it("DELETE /watcher/pending succeeds (deletes file) when processedPath is unset BUT deleteAfterImport is true", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "",
+      deleteAfterImport: true,
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    vi.mocked(getPending).mockReturnValue({
+      filename: "foo.pdf",
+      filePath: "/inbox/foo.pdf",
+      detectedAt: "2026-01-01T00:00:00.000Z",
+      status: "ready",
+    } as any);
+
+    const res = await app.request(
+      "/watcher/pending/foo.pdf?detectedAt=2026-01-01T00%3A00%3A00.000Z",
+      { method: "DELETE", headers: { Authorization: authHeader } },
+    );
+
+    expect(res.status).toBe(200);
+    // No processedPath → empty keepDir; disposeSourceFile's
+    // deleteAfterImport branch unlinks regardless of keepDir.
+    expect(disposeSourceFile).toHaveBeenCalledWith("/inbox/foo.pdf", "foo.pdf", "");
+    expect(removePending).toHaveBeenCalledWith("foo.pdf");
+  });
+
+  // Premortem 2026-05-19 Bug 2 fix: when disposeSourceFile throws (perms,
+  // processed parent vanished), the route returns 500 WITHOUT
+  // removePending. The FE side (usePendingFiles.skipFile) now refetches
+  // on any non-409 failure to restore the entry instead of leaving the
+  // optimistic remove in place + ghost-resurrecting.
+  it("DELETE /watcher/pending returns 500 (no removePending) when disposeSourceFile throws", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    vi.mocked(getPending).mockReturnValue({
+      filename: "foo.pdf",
+      filePath: "/inbox/foo.pdf",
+      detectedAt: "2026-01-01T00:00:00.000Z",
+      status: "ready",
+    } as any);
+    vi.mocked(disposeSourceFile).mockImplementationOnce(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await app.request(
+      "/watcher/pending/foo.pdf?detectedAt=2026-01-01T00%3A00%3A00.000Z",
+      { method: "DELETE", headers: { Authorization: authHeader } },
+    );
+
+    expect(res.status).toBe(500);
+    expect(removePending).not.toHaveBeenCalled();
   });
 
   // Regression: when a brand-new user finished the SetupWizard, the
@@ -410,13 +519,17 @@ describe("Hono app integration", () => {
   });
 
   it("DELETE /watcher/pending without a token still works (back-compat)", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
     vi.mocked(getPending).mockReturnValue({
       filename: "foo.pdf",
-      filePath: "/inbox/nonexistent-foo.pdf",
+      filePath: "/inbox/foo.pdf",
       detectedAt: "2026-01-01T00:00:00.000Z",
       status: "ready",
     } as any);
-    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const res = await app.request("/watcher/pending/foo.pdf", {
       method: "DELETE",
@@ -424,6 +537,7 @@ describe("Hono app integration", () => {
     });
 
     expect(res.status).toBe(200);
+    expect(disposeSourceFile).toHaveBeenCalled();
     expect(removePending).toHaveBeenCalledWith("foo.pdf");
   });
 

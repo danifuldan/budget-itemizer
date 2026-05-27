@@ -1,5 +1,6 @@
 import { useCallback } from "react";
-import { apiFetch } from "../api/client";
+import { apiFetch, ApiError } from "../api/client";
+import { sendNotification } from "./useWatcherNotifications";
 import type { PendingFileInfo } from "./useWatcherEvents";
 
 export function usePendingFiles(
@@ -35,10 +36,29 @@ export function usePendingFiles(
     } catch (err: any) {
       const status = typeof err?.status === "number" ? err.status : undefined;
       if (status === 409) {
+        // Concurrent re-upload — refresh to show the new entry.
         await fetchPending();
         return;
       }
+      // Any other failure (422 = no processed folder; 500 = dispose
+      // failed; network = server unreachable) → roll back the optimistic
+      // remove by refetching, and surface the server-provided reason.
+      // Without this, the entry silently ghost-resurrects on the next
+      // poll with no clue why the discard didn't stick.
+      let reason = "Could not discard the receipt";
+      if (err instanceof ApiError) {
+        try {
+          const parsed = JSON.parse(err.body) as { error?: string };
+          if (parsed.error) reason = parsed.error;
+        } catch {
+          if (err.body) reason = err.body;
+        }
+      } else if (err?.message) {
+        reason = err.message;
+      }
       console.warn(`Failed to delete pending file on server: ${err}`);
+      void sendNotification("Couldn't discard receipt", reason);
+      await fetchPending();
     }
   }, [removePendingLocal, fetchPending]);
 

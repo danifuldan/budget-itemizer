@@ -105,9 +105,29 @@ watcher.delete("/pending/:filename", auth, async (c) => {
   // cancel/failure against the user's stated preference.
   const processedPath = getConfig().processedPath;
   if (!processedPath) {
-    // Unreachable in practice (setup requires processedPath). Don't
-    // delete; just clear the queue entry.
-    console.warn(`No processedPath; discarding ${filename} without relocating its file`);
+    // No processed folder configured. If the user has opted into
+    // delete-after-import, the source can be safely unlinked (no need
+    // for a keepDir). Otherwise we have nowhere to put the file — and
+    // silently leaving it in the inbox (the prior behavior here) made
+    // the watcher re-queue it on the next poll, ghost-resurrecting the
+    // same receipt with no explanation. Refuse instead.
+    if (!getConfig().deleteAfterImport) {
+      return c.json(
+        {
+          error:
+            "Set a Processed folder in Settings (or enable 'Delete file after import') so Discard knows where to put the file.",
+        },
+        422,
+      );
+    }
+    try {
+      // deleteAfterImport branch inside disposeSourceFile unlinks
+      // regardless of keepDir — empty keepDir is fine here.
+      disposeSourceFile(pending.filePath, filename, "");
+    } catch (e: any) {
+      console.warn(`Could not delete discarded file ${filename}: ${e.message}`);
+      return c.json({ error: "Could not delete the file from the inbox" }, 500);
+    }
     removePending(filename);
     return c.json({ success: true }, 200);
   }
@@ -115,7 +135,9 @@ watcher.delete("/pending/:filename", auth, async (c) => {
     disposeSourceFile(pending.filePath, filename, path.join(processedPath, "discarded"));
   } catch (e: any) {
     // Move failed (cross-device / perms). Do NOT removePending — keep the
-    // queue reflecting it so the receipt isn't silently lost.
+    // queue reflecting it so the receipt isn't silently lost. The FE
+    // surfaces the 500 to the user + refetches so the entry doesn't
+    // ghost-resurrect with no explanation (usePendingFiles.ts skipFile).
     console.warn(`Could not dispose discarded file ${filename}: ${e.message}`);
     return c.json({ error: "Could not move the file out of the inbox" }, 500);
   }
