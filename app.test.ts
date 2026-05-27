@@ -89,6 +89,7 @@ import { getAllAccounts, getAllEnvelopes } from "./services/budget";
 import { importReceiptToYnab } from "./services/receipt";
 import { saveConfig, isSetupComplete } from "./services/config";
 import { claimForImport, releaseImportClaim, getPending, removePending, clearAllPending, getWatcherStatus, stopWatcher, startWatcher, queueFile, addPending, disposeSourceFile } from "./services/watcher";
+import { addRecord } from "./services/history";
 import { getConfig } from "./services/config";
 import { getLlamaServerStartError } from "./services/llama-server";
 
@@ -516,6 +517,75 @@ describe("Hono app integration", () => {
     expect(stopWatcher).toHaveBeenCalled();
     expect(clearAllPending).not.toHaveBeenCalled();
     expect(startWatcher).toHaveBeenCalled();
+  });
+
+  // 2026-05-27 follow-up: failed parses used to disappear on discard with
+  // no audit trail. Failed *imports* always got a history record (see
+  // services/watcher.ts:472), failed parses didn't — bug reporting was
+  // harder than it should have been. Discard now persists error-state
+  // pending entries to history with success=false + the parseError.
+  it("DELETE /watcher/pending: error-state entry adds a failure to history", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    vi.mocked(getPending).mockReturnValue({
+      filename: "broken.pdf",
+      filePath: "/inbox/broken.pdf",
+      detectedAt: "2026-01-01T00:00:00.000Z",
+      status: "error",
+      parseError: "OCR couldn't extract any text",
+    } as any);
+
+    const res = await app.request("/watcher/pending/broken.pdf", {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    });
+
+    expect(res.status).toBe(200);
+    expect(addRecord).toHaveBeenCalledTimes(1);
+    expect(addRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: "broken.pdf",
+        success: false,
+        error: "OCR couldn't extract any text",
+        // Parse never produced a receipt, so merchant/amount/itemCount
+        // are all empty/zero — the HistoryRow component renders this
+        // shape as a filename + error string instead of the usual
+        // merchant/total/itemCount layout.
+        merchant: "",
+        totalAmount: 0,
+        itemCount: 0,
+      }),
+    );
+    expect(removePending).toHaveBeenCalledWith("broken.pdf");
+  });
+
+  it("DELETE /watcher/pending: ready-state (non-error) entry does NOT add to history", async () => {
+    // A user changing their mind on a successfully-parsed receipt they
+    // decided not to import is not a failure — nothing to record.
+    vi.mocked(getConfig).mockReturnValue({
+      processedPath: "/processed",
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    vi.mocked(getPending).mockReturnValue({
+      filename: "ok.pdf",
+      filePath: "/inbox/ok.pdf",
+      detectedAt: "2026-01-01T00:00:00.000Z",
+      status: "ready",
+      receipt: { merchant: "Costco", totalAmount: 47.32 } as any,
+    } as any);
+
+    const res = await app.request("/watcher/pending/ok.pdf", {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    });
+
+    expect(res.status).toBe(200);
+    expect(addRecord).not.toHaveBeenCalled();
+    expect(removePending).toHaveBeenCalledWith("ok.pdf");
   });
 
   it("DELETE /watcher/pending without a token still works (back-compat)", async () => {

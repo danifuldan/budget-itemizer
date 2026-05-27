@@ -139,7 +139,16 @@ export default function HistoryRow({ record, onClick, onDelete }: HistoryRowProp
     wrapper.addEventListener("animationend", () => onDelete?.(), { once: true });
   }, [onDelete]);
 
-  const ariaLabel = `${record.merchant}, ${formatAmount(record.totalAmount)}, ${record.itemCount} items, ${record.success ? "imported" : "failed"}`;
+  // Parse failures never produced a receipt — merchant/total/itemCount
+  // are all empty/zero, so the regular "merchant + $X.XX + N items"
+  // layout reads as noise ("", $0.00, 0 items). Distinct render path:
+  // show the filename + the error message instead. Import failures
+  // (parse succeeded, then YNAB/Actual failed) keep the existing
+  // layout — they have a populated receipt.
+  const isParseFailure = !record.success && !record.receipt;
+  const ariaLabel = isParseFailure
+    ? `${record.filename}, parse failed: ${record.error || "no details"}`
+    : `${record.merchant}, ${formatAmount(record.totalAmount)}, ${record.itemCount} items, ${record.success ? "imported" : "failed"}`;
 
   return (
     <div className="history-row-wrapper" ref={wrapperRef}>
@@ -179,9 +188,14 @@ export default function HistoryRow({ record, onClick, onDelete }: HistoryRowProp
       >
         <div className="history-icon" aria-hidden="true">{monogram}</div>
         <div className="history-info">
-          <div className="history-merchant">{record.merchant}</div>
+          <div className="history-merchant">
+            {isParseFailure ? record.filename : record.merchant}
+          </div>
+          {isParseFailure && record.error && (
+            <div className="history-parse-error">{record.error}</div>
+          )}
           <div className="history-meta">
-            {formatDate(record.transactionDate)}
+            {!isParseFailure && formatDate(record.transactionDate)}
             {record.importedAt && (
               <span className="history-time-ago">{timeAgo(record.importedAt)}</span>
             )}
@@ -190,12 +204,14 @@ export default function HistoryRow({ record, onClick, onDelete }: HistoryRowProp
             </span>
           </div>
         </div>
-        <div className="history-amount">
-          <div className="history-amount-value">{formatAmount(record.totalAmount)}</div>
-          <div className="history-amount-detail">
-            {record.itemCount} item{record.itemCount !== 1 ? "s" : ""}
+        {!isParseFailure && (
+          <div className="history-amount">
+            <div className="history-amount-value">{formatAmount(record.totalAmount)}</div>
+            <div className="history-amount-detail">
+              {record.itemCount} item{record.itemCount !== 1 ? "s" : ""}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -18,9 +18,32 @@ import {
   disposeSourceFile,
   abortParse,
   queueFile,
+  type PendingFile,
 } from "../../services/watcher";
+import { addRecord } from "../../services/history";
 
 const watcher = new Hono();
+
+// When the user discards a failed-PARSE pending entry, persist it to
+// history with `success: false` so the attempt has an audit trail (the
+// existing auto-import-failure path already does this for failed
+// imports). Bug-reporting relies on having the error message around
+// after the user has cleared the receipt from their pending list —
+// without this, a parse failure disappears the moment you Discard it.
+// Non-error discards (a "ready" receipt the user changed their mind
+// on) don't get a history entry — they were never even attempted.
+function recordParseFailureOnDiscard(pending: PendingFile): void {
+  if (pending.status !== "error") return;
+  addRecord({
+    filename: pending.filename,
+    merchant: "", // parse never extracted one
+    totalAmount: 0,
+    itemCount: 0,
+    transactionDate: new Date().toISOString().split("T")[0],
+    success: false,
+    error: pending.parseError || "Parse failed",
+  });
+}
 
 watcher.get("/events", sseAuth, async (c) => {
   return streamSSE(c, async (stream) => {
@@ -128,6 +151,7 @@ watcher.delete("/pending/:filename", auth, async (c) => {
       console.warn(`Could not delete discarded file ${filename}: ${e.message}`);
       return c.json({ error: "Could not delete the file from the inbox" }, 500);
     }
+    recordParseFailureOnDiscard(pending);
     removePending(filename);
     return c.json({ success: true }, 200);
   }
@@ -141,6 +165,7 @@ watcher.delete("/pending/:filename", auth, async (c) => {
     console.warn(`Could not dispose discarded file ${filename}: ${e.message}`);
     return c.json({ error: "Could not move the file out of the inbox" }, 500);
   }
+  recordParseFailureOnDiscard(pending);
   removePending(filename);
   return c.json({ success: true }, 200);
 });
