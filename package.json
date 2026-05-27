@@ -20,7 +20,7 @@
     "build:frontend": "vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "rm -f src-tauri/target/release/bundle/macos/rw.*.dmg src-tauri/target/release/bundle/macos/.DS_Store && tauri build && hdiutil attach src-tauri/target/release/bundle/dmg/*.dmg",
+    "tauri:build": "scripts/tauri-build-dmg-resilient.sh",
     "build:signed": "TAURI_SIGNING_PRIVATE_KEY=\"$HOME/Documents/Developer/budget-itemizer/updater.key\" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\"$(security find-generic-password -s com.budget-itemizer.updater-signing-key -w)\" npm run tauri:build",
     "build:server": "node build-server.mjs",
     "test": "vitest run",
