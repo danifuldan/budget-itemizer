@@ -17,6 +17,35 @@ import {
 } from "./budget-provider";
 import { writeRestrictedFile, ensureRestrictedDir } from "../utils/restricted-file";
 
+// YNAB's import_id is the native bank-import dedupe key (≤36 chars,
+// per-account uniqueness). We use a deterministic "BI:" + truncated
+// sha256 so:
+//   - An ack-lost retry of the SAME receipt has the SAME import_id ⇒
+//     YNAB rejects the duplicate (idempotent retry).
+//   - Two distinct receipts with identical merchant+date+amount but
+//     different bytes get DIFFERENT import_ids ⇒ no silent collision.
+// The `sourceHash` argument (SHA-256 of the original file bytes,
+// computed once at parse) is what disambiguates the latter. Omit it
+// and you get the pre-fix key — used by legacy callers and tests that
+// don't have a file in hand. Findmatching uses the same helper to
+// reject candidates whose import_id is a *different* BI:-fingerprint.
+const IMPORT_ID_PREFIX = "BI:";
+export function computeImportId(
+  accountId: string,
+  merchant: string,
+  transactionDate: string,
+  fixedTotalAmount: number,
+  sourceHash?: string,
+): string {
+  const key =
+    `${accountId}|${merchant}|${transactionDate}|${fixedTotalAmount}` +
+    (sourceHash ? `|${sourceHash}` : "");
+  return (
+    IMPORT_ID_PREFIX +
+    createHash("sha256").update(key).digest("hex").slice(0, 36 - IMPORT_ID_PREFIX.length)
+  );
+}
+
 // Lazily create/refresh the YNAB API client so it picks up config changes
 // (e.g., after the setup wizard saves a new API key).
 let _api: ynab.API | null = null;
@@ -445,12 +474,27 @@ export class YnabBudgetProvider implements BudgetProvider {
     date: string,
     merchant: string,
     splitAmounts?: number[],
+    sourceHash?: string,
   ): Promise<{ id: string } | null> {
     const budgetId = getBudgetId();
     const matchAcrossAccounts = getConfig().matchAcrossAccounts;
 
     // Convert to milliunits (negative for outflows)
     const targetAmount = Math.round(-amount * 1000);
+
+    // When we have a sourceHash, compute the incoming receipt's would-be
+    // import_id. Any candidate whose own import_id is a `BI:`-prefixed
+    // deterministic fingerprint that DIFFERS from this one is, by
+    // definition, a different receipt — even if amount+date+merchant
+    // line up. This is what stops two distinct receipts from being
+    // conflated by the splits-similarity tiering below. Candidates with
+    // no import_id (or a non-BI one) are left to the existing tier
+    // system; we only use the fingerprint to *reject*, never to *force*
+    // a match (a same-fingerprint candidate already wins via Tier 0
+    // similarity because the splits are literally identical).
+    const incomingImportId = sourceHash
+      ? computeImportId(accountId, merchant, date, targetAmount, sourceHash)
+      : null;
 
     // Parse dates as UTC to avoid timezone-dependent shifts.
     const receiptDate = new Date(date + "T00:00:00Z");
@@ -503,6 +547,19 @@ export class YnabBudgetProvider implements BudgetProvider {
         (txDate.getTime() - receiptDate.getTime()) / (1000 * 60 * 60 * 24),
       );
       if (diffDays > 3) return false;
+
+      // Source-fingerprint reject: a candidate carrying a different BI:
+      // fingerprint is a different receipt that happens to share
+      // amount+date. Refusing to consider it stops the silent-overwrite
+      // half of the original accepted-residual bug.
+      if (
+        incomingImportId &&
+        t.import_id &&
+        t.import_id.startsWith(IMPORT_ID_PREFIX) &&
+        t.import_id !== incomingImportId
+      ) {
+        return false;
+      }
 
       return true;
     });
@@ -633,25 +690,18 @@ export class YnabBudgetProvider implements BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    sourceHash?: string,
   ): Promise<void> {
     const fixedTotalAmount = Math.round(-totalAmount * 1000);
-    // Deterministic YNAB import_id (≤36 chars). On an ack-lost retry of
-    // the SAME receipt, /import re-creates with the same import_id and
-    // YNAB's native bank-import dedupe rejects the duplicate (F2).
-    // Keyed by the stable account *id* (not the mutable display name) so
-    // a YNAB rename never changes the dedupe key for the same account.
-    // YNAB's import_id uniqueness is per-account; scoping by account id
-    // also means a legitimate re-file of the same receipt to a DIFFERENT
-    // account is NOT silently swallowed. (Two genuinely-distinct receipts
-    // with identical account+merchant+date+amount still collide — same
-    // trade-off banks/YNAB make on real imports; rare and far less
-    // harmful than a duplicate transaction.)
-    const importId =
-      "BI:" +
-      createHash("sha256")
-        .update(`${accountId}|${merchant}|${transactionDate}|${fixedTotalAmount}`)
-        .digest("hex")
-        .slice(0, 33);
+    // Deterministic YNAB import_id. On an ack-lost retry of the SAME
+    // receipt, /import re-creates with the same import_id and YNAB's
+    // native bank-import dedupe rejects the duplicate (F2). Keyed by the
+    // stable account *id* (a YNAB rename never changes the dedupe key)
+    // AND by `sourceHash` when present — two distinct receipts with
+    // identical merchant+date+amount but different bytes can no longer
+    // collide (the "accepted residual" that wasn't really acceptable).
+    // See `computeImportId` above for the full rationale.
+    const importId = computeImportId(accountId, merchant, transactionDate, fixedTotalAmount, sourceHash);
     const fixedSplits = splits?.map((split) => ({
       category: split.category,
       amount: Math.round(-split.amount * 1000),

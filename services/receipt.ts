@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createHash } from "crypto";
 import type { Receipt } from "./shared-types";
 import {
   createTransaction,
@@ -148,6 +149,7 @@ export const importReceipt = async (
       receipt.transactionDate,
       receipt.merchant,
       splitAmounts,
+      receipt.sourceHash,
     );
 
     if (match) {
@@ -171,7 +173,8 @@ export const importReceipt = async (
         receipt.transactionDate,
         memo,
         receipt.totalAmount,
-        splits
+        splits,
+        receipt.sourceHash,
       );
     }
   } catch (err) {
@@ -289,6 +292,12 @@ export const parseImageReceiptStream = async (
 
   throwIfAborted();
   const fileBuffer = Buffer.from(await file.arrayBuffer());
+  // Content-address the source file once, at parse time. Threaded through
+  // to the budget provider as `sourceHash` so two distinct receipts with
+  // identical merchant+date+amount can't collide on YNAB's dedupe key OR
+  // be conflated by findMatchingTransaction. Same physical bytes → same
+  // hash → idempotent retries still work.
+  const sourceHash = createHash("sha256").update(fileBuffer).digest("hex");
   throwIfAborted();
   const ynabCategories = await getAllCategories();
   throwIfAborted();
@@ -312,6 +321,7 @@ export const parseImageReceiptStream = async (
     throw new ReceiptParseError("understanding provider returned no result");
   }
 
+  receipt.sourceHash = sourceHash;
   return receipt;
 };
 

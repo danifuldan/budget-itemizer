@@ -23,6 +23,13 @@ export interface Receipt {
   credit?: number;
   creditLabel?: string;
   refund?: number;
+  /** SHA-256 (hex) of the source PDF/image bytes. Computed once at parse
+   *  time, used by the budget provider as a per-receipt fingerprint so
+   *  two genuinely-distinct receipts with identical merchant+date+amount
+   *  cannot collide on YNAB's dedupe key (and cannot mis-match each other
+   *  in `findMatchingTransaction`). Optional: omitted on receipts parsed
+   *  before this field existed, or in tests that don't have a source file. */
+  sourceHash?: string;
 }
 
 export interface ReceiptLineItem {

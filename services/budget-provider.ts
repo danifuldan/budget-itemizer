@@ -142,6 +142,12 @@ export interface BudgetProvider {
      *  existing subtransactions — high similarity is a strong signal of
      *  "same receipt re-imported, safe to overwrite." */
     splitAmounts?: number[],
+    /** Optional: per-receipt content fingerprint (SHA-256 of source file
+     *  bytes). When present, a candidate whose import_id is one of our
+     *  deterministic `BI:`-prefixed IDs but doesn't match THIS receipt's
+     *  fingerprint is explicitly NOT a match — two distinct receipts that
+     *  happen to share amount+date+merchant can't get conflated. */
+    sourceHash?: string,
   ): Promise<{ id: string } | null>;
   updateTransactionWithSplits(
     transactionId: string,
@@ -159,6 +165,12 @@ export interface BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    /** Optional: per-receipt content fingerprint folded into the YNAB
+     *  `import_id` so two distinct receipts with the same merchant+date+
+     *  amount cannot collide on YNAB's native bank-import dedupe. Same
+     *  physical file → same hash → same import_id (idempotent retry still
+     *  works). Ignored by providers without an equivalent dedupe key. */
+    sourceHash?: string,
   ): Promise<void>;
   testConnection(): Promise<void>;
   shutdown(): Promise<void>;

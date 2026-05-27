@@ -251,6 +251,10 @@ export class ActualBudgetProvider implements BudgetProvider {
     date: string,
     merchant: string,
     splitAmounts?: number[],
+    // Actual has no native bank-import dedupe key, so the fingerprint is
+    // accepted to satisfy the BudgetProvider contract but unused here.
+    // The YNAB-specific overwrite/silent-drop pathology doesn't apply.
+    _sourceHash?: string,
   ): Promise<{ id: string } | null> {
     await ensureBudget();
     const api = await loadApi();
@@ -466,6 +470,9 @@ export class ActualBudgetProvider implements BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    // Actual has no native bank-import dedupe key (no equivalent of YNAB's
+    // import_id). Accepted to satisfy the BudgetProvider contract; unused.
+    _sourceHash?: string,
   ): Promise<void> {
     await ensureBudget();
     const api = await loadApi();

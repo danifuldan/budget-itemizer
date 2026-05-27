@@ -10,7 +10,8 @@ export const findMatchingTransaction = (
   date: string,
   merchant: string,
   splitAmounts?: number[],
-) => getBudgetProvider().findMatchingTransaction(accountName, amount, date, merchant, splitAmounts);
+  sourceHash?: string,
+) => getBudgetProvider().findMatchingTransaction(accountName, amount, date, merchant, splitAmounts, sourceHash);
 export const updateTransactionWithSplits = (
   transactionId: string,
   merchant: string,
@@ -35,6 +36,7 @@ export const createTransaction = (
   memo: string,
   totalAmount: number,
   splits?: { category: string; amount: number; memo?: string }[],
+  sourceHash?: string,
 ) =>
   getBudgetProvider().createTransaction(
     accountName,
@@ -44,4 +46,5 @@ export const createTransaction = (
     memo,
     totalAmount,
     splits,
+    sourceHash,
   );
