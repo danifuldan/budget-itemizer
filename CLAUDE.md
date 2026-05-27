@@ -99,3 +99,18 @@ only if it bites," etc.) are flagged informational. Bypass for a one-off:
 ```
 ln -sf ../../scripts/triage-todo.sh .git/hooks/pre-commit
 ```
+
+## Decision log
+
+`docs/DECISIONS.md` is an append-only log (newest at top) for non-trivial
+decisions that aren't already captured by a git commit — alternatives
+considered, process choices, strategic / scope calls, paused-work context.
+Entry shape: title with date, **Context**, **Considered**, **Decided**,
+**Consequences**. 5-15 lines each.
+
+When to write one: any decision where someone (future you, future me) might
+reasonably ask *"why did we do X instead of Y?"* and the answer isn't
+already in git or a commit message. Reversing a prior decision means a
+follow-on entry, not editing the old one — readers should be able to see
+the path. If in doubt, write it: cost of an extra entry is one paragraph;
+cost of skipping is re-litigating the same call months later.
