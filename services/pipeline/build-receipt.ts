@@ -298,6 +298,15 @@ Assign a category to each item. Return a JSON array with one category string per
 
     return items.map((_, i) => categories[i] || null);
   } catch (err) {
+    // Don't swallow a user-initiated abort as "categorization failed,
+    // here's a row of nulls" — that's the bug that lets a Discard
+    // mid-parse silently complete the pipeline with empty categories on
+    // every line item AND fire events.onDone as if the parse had
+    // succeeded. Re-throw so the cancel propagates up to the route
+    // handler, where it's already handled (the FE bailed; we should too).
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      throw err;
+    }
     console.error("Category assignment failed:", err);
     return items.map(() => null);
   }
@@ -419,6 +428,13 @@ ${cleaned}`;
     }
     parser.finish();
   } catch (err) {
+    // Re-throw user-initiated aborts so they don't surface as misleading
+    // "Label extraction failed" errors. Without this, a Discard during
+    // label extract fires events.onError("label-extraction") — the FE
+    // sees a parse failure when the user was just cancelling.
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      throw err;
+    }
     const error = err instanceof Error ? err : new Error(String(err));
     console.error("[stream] Label extraction failed:", error.message);
     await events.onError?.(error, "label-extraction");
