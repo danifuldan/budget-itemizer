@@ -81,3 +81,21 @@ and the suite only ever asserted "valid input -> success."
    Wholesale-replace is the recurring failure (pattern 1). Ask "what did
    the old behavior keep that the new one discards?" and make that a test
    (e.g. a user edit/deletion made mid-stream survives completion).
+
+## Backlog discipline (enforced by pre-commit hook)
+
+`docs/TODO.md` is a live working set, not a journal. Four sections
+(`NOW` / `NEXT` / `LATER` / `ACCEPTED`); resolved items get DELETED, not
+checked; ACCEPTED entries carry a `Re-review: YYYY-MM-DD` line.
+
+A pre-commit hook (`scripts/triage-todo.sh`) blocks commits when the file
+drifts: any `[x]` entries, any ACCEPTED `Re-review` date in the past, or
+NOW with more than 2 items. Suspect framings ("rare and bounded," "fix
+only if it bites," etc.) are flagged informational. Bypass for a one-off:
+`git commit --no-verify`.
+
+**One-time install on a new clone:**
+
+```
+ln -sf ../../scripts/triage-todo.sh .git/hooks/pre-commit
+```
