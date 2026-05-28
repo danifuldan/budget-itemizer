@@ -476,6 +476,13 @@ export class YnabBudgetProvider implements BudgetProvider {
     splitAmounts?: number[],
     sourceHash?: string,
   ): Promise<{ id: string } | null> {
+    // Snapshot the credential-bound clients ONCE for the whole call. The YNAB
+    // API key can change mid-import (the user saves a new key in Settings while
+    // a watcher import is in flight); re-resolving the client per await — as
+    // getApi()/getBudgets() each do — would validate the account against one
+    // token and then read transactions against another, an inconsistent read in
+    // the money path (F8b). budgetId is snapshotted for the same reason.
+    const { api, budgets } = ensureClients();
     const budgetId = getBudgetId();
     const matchAcrossAccounts = getConfig().matchAcrossAccounts;
 
@@ -505,20 +512,20 @@ export class YnabBudgetProvider implements BudgetProvider {
     let transactions: ynab.TransactionDetail[];
 
     if (matchAcrossAccounts) {
-      const response = await getApi()
-        .transactions.getTransactions(budgetId, sinceDateStr)
+      const response = await api.transactions
+        .getTransactions(budgetId, sinceDateStr)
         .catch(wrapYnabError);
       transactions = response.data.transactions;
     } else {
-      const budget = await getBudgets().getBudgetById(budgetId).catch(wrapYnabError);
+      const budget = await budgets.getBudgetById(budgetId).catch(wrapYnabError);
       const exists = budget.data.budget.accounts?.some((a) => a.id === accountId);
 
       if (!exists) {
         throw new Error("Account not found");
       }
 
-      const response = await getApi()
-        .transactions.getTransactionsByAccount(budgetId, accountId, sinceDateStr)
+      const response = await api.transactions
+        .getTransactionsByAccount(budgetId, accountId, sinceDateStr)
         .catch(wrapYnabError);
       transactions = response.data.transactions;
     }
@@ -647,6 +654,10 @@ export class YnabBudgetProvider implements BudgetProvider {
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
   ): Promise<void> {
+    // Snapshot credential + budgetId once (F8b): a key/budget change between
+    // the read below and the write must not split this call across two tokens.
+    const { budgets, transactions } = ensureClients();
+    const budgetId = getBudgetId();
     const fixedTotalAmount = Math.round(-totalAmount * 1000);
     const fixedSplits = splits?.map((split) => ({
       category: split.category,
@@ -654,7 +665,7 @@ export class YnabBudgetProvider implements BudgetProvider {
       memo: split.memo,
     }));
 
-    const budget = await getBudgets().getBudgetById(getBudgetId());
+    const budget = await budgets.getBudgetById(budgetId);
 
     const subtransactions: ynab.SaveSubTransaction[] = fixedSplits
       ? buildYnabSubtransactions(budget, fixedTotalAmount, fixedSplits)
@@ -671,7 +682,7 @@ export class YnabBudgetProvider implements BudgetProvider {
       }
     }
 
-    await getTransactions().updateTransaction(getBudgetId(), transactionId, {
+    await transactions.updateTransaction(budgetId, transactionId, {
       transaction: {
         category_id: subtransactions.length > 1 ? null : categoryId,
         payee_name: merchant,
@@ -702,13 +713,18 @@ export class YnabBudgetProvider implements BudgetProvider {
     // collide (the "accepted residual" that wasn't really acceptable).
     // See `computeImportId` above for the full rationale.
     const importId = computeImportId(accountId, merchant, transactionDate, fixedTotalAmount, sourceHash);
+    // Snapshot credential + budgetId once (F8b): the per-budget import_id dedupe
+    // is only sound if the account check and the create run against the same
+    // budget/token. A mid-call key change would let a create escape the dedupe.
+    const { budgets, transactions } = ensureClients();
+    const budgetId = getBudgetId();
     const fixedSplits = splits?.map((split) => ({
       category: split.category,
       amount: Math.round(-split.amount * 1000),
       memo: split.memo,
     }));
 
-    const budget = await getBudgets().getBudgetById(getBudgetId());
+    const budget = await budgets.getBudgetById(budgetId);
 
     if (!budget.data.budget.accounts?.some((a) => a.id === accountId)) {
       throw new Error("Account not found");
@@ -729,7 +745,7 @@ export class YnabBudgetProvider implements BudgetProvider {
       }
     }
 
-    await getTransactions().createTransaction(getBudgetId(), {
+    await transactions.createTransaction(budgetId, {
       transaction: {
         account_id: accountId,
         amount: fixedTotalAmount,
