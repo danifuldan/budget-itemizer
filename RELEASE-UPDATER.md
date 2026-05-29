@@ -53,26 +53,27 @@ The build produces:
 - `src-tauri/target/release/bundle/macos/Budget Itemizer.app.tar.gz.sig`
   (signature over the tarball, produced from the private key)
 
-### 3. Create the `latest.json` manifest
+### 3. Generate the `latest.json` manifest
 
-Tauri's updater plugin polls this file. Create it locally:
+Tauri's updater plugin polls this file. **Generate it with the script — do not
+hand-write or copy-paste the signature.** The `.sig` file is *already* base64;
+pasting it through an extra `base64`/`btoa` step double-wraps it, Tauri decodes
+exactly once, and every update silently fails to install. That is exactly what
+broke v0.3.7 (see `docs/DECISIONS.md`, 2026-05-29). The script reads the `.sig`
+verbatim and refuses to run if the input is already double-encoded.
 
-```json
-{
-  "version": "0.1.1",
-  "notes": "Brief user-facing release notes.",
-  "pub_date": "2026-05-12T20:00:00Z",
-  "platforms": {
-    "darwin-aarch64": {
-      "signature": "<paste contents of Budget Itemizer.app.tar.gz.sig here>",
-      "url": "https://github.com/danifuldan/budget-itemizer/releases/download/v0.1.1/Budget.Itemizer.app.tar.gz"
-    }
-  }
-}
+```bash
+scripts/release-manifest.sh generate \
+  --tarball "src-tauri/target/release/bundle/macos/Budget Itemizer.app.tar.gz" \
+  --sig     "src-tauri/target/release/bundle/macos/Budget Itemizer.app.tar.gz.sig" \
+  --url     "https://github.com/danifuldan/budget-itemizer/releases/download/v0.1.1/Budget-Itemizer-0.1.1-aarch64.app.tar.gz" \
+  --notes-file release-notes-v0.1.1.md
+# version + pub_date default from tauri.conf.json / now; --out defaults to ./latest.json
 ```
 
-The `signature` field is the *full text* of the `.sig` file (a single base64-ish
-line). Open the `.sig` and paste its contents verbatim.
+The `--url` MUST match the asset name you actually upload in step 4. The verify
+gate in step 5 fetches that url and checks the signature against those bytes, so
+a wrong/renamed url fails the gate rather than shipping a broken updater.
 
 ### 4. Cut a GitHub Release
 
@@ -90,26 +91,38 @@ The asset names matter because the manifest URL hardcodes them. Renaming the
 `.tar.gz` in the release breaks the updater for everyone running the old
 version.
 
-### 5. Verify
+### 5. Verify (load-bearing gate — do not skip)
 
-After publishing, check that the manifest is reachable:
+After publishing, run the gate against the **live** endpoint. It fails (non-zero)
+unless the signature decodes in exactly one base64 step to a minisign header AND
+`minisign -V` verifies it against the tarball the manifest's url points at:
 
 ```bash
-curl -sL https://github.com/danifuldan/budget-itemizer/releases/latest/download/latest.json | jq .
+scripts/release-manifest.sh verify \
+  "https://github.com/danifuldan/budget-itemizer/releases/latest/download/latest.json"
+# → "VERIFY OK ✓" or a specific GATE FAIL (double-encoded / malformed / bad sig).
 ```
 
-Then in an existing install:
+The old check here was only `curl … | jq .` (reachability) — it never verified
+the signature parsed, which is precisely why the v0.3.7 double-encode shipped.
+Don't go back to a reachability-only check.
+
+Then confirm end-to-end in an existing install:
 
 - Open Settings → "Update" row → click "Check now". Should detect the new
   version. Clicking "Install & relaunch" should download the tar.gz,
   verify its signature against the embedded public key, atomically replace
   the .app, and relaunch.
 
-If the signature doesn't verify, the plugin rejects the update silently
-in the logs (`tail ~/Library/Logs/com.budget-itemizer.desktop/Budget Itemizer.log`).
-That means either (a) you signed with the wrong key, (b) the `.sig` file
-contents in `latest.json` don't match the actual `.sig`, or (c) you
-re-uploaded the tar.gz without re-signing.
+If the gate or the plugin rejects the update, the cause is one of: (a) signed
+with the wrong key, (b) the signature in `latest.json` is double-encoded or
+doesn't match the actual `.sig`, or (c) the tar.gz was re-uploaded without
+re-signing. The plugin logs the rejection at
+`~/Library/Logs/com.budget-itemizer.desktop/Budget Itemizer.log`.
+
+Note: `latest.json` itself is **not** signed, so correcting a bad manifest is a
+safe re-upload of that one asset (`gh release upload <tag> latest.json --clobber`)
+— unlike the tar.gz, which must never be replaced without re-signing.
 
 ## Rollback
 
