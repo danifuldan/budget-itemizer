@@ -1,6 +1,6 @@
 {
   "name": "budget-itemizer",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Split and categorize online receipts for YNAB and Actual Budget — free, local, and private.",
   "author": "danifuldan",
   "license": "GPL-3.0-only",
@@ -30,7 +30,8 @@
     "smoke:fixtures": "tsx smoke/fixtures.ts",
     "smoke:use-path": "tsx smoke/use-path.ts",
     "smoke:fresh-install": "tsx smoke/fresh-install.ts",
-    "smoke:personal": "tsx smoke/personal.ts"
+    "smoke:personal": "tsx smoke/personal.ts",
+    "smoke:sidecar-shutdown": "tsx smoke/sidecar-shutdown.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
