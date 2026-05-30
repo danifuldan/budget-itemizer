@@ -8,7 +8,14 @@ import { getAllAccounts } from "./services/budget";
 import { getModelPath } from "./services/model-manager";
 import { startLlamaServer, stopAll as stopAllLlamaServers } from "./services/llama-server";
 import { setCategoriesReconnectCallback } from "./services/budget-ynab";
+import { installProcessGuards } from "./services/process-guards";
 import app from "./app";
+
+// Install the process-level safety net at module scope — as early as possible,
+// before any module side effect or async work runs — so a detached rejection
+// (e.g. @actual-app/api's _fullSync on a missing Sync ID) can never crash the
+// sidecar. See services/process-guards.ts.
+installProcessGuards();
 
 // Wire YNAB-reconnect → revalidate-pending-receipts at module load. The
 // callback fires once when a real YNAB fetch succeeds AFTER the previous
