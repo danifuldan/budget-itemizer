@@ -258,6 +258,22 @@ export class ActualBudgetProvider implements BudgetProvider {
   ): Promise<{ id: string } | null> {
     await ensureBudget();
     const api = await loadApi();
+    // Pull the server's latest BEFORE matching. ensureBudget short-circuits
+    // once the budget is loaded (no re-sync), so without this the matcher
+    // reads a STALE local copy and misses transactions added in Actual after
+    // load (bank feed, the web app, another device) — returning "no match" and
+    // creating a DUPLICATE. (Found 2026-05-30; Actual has no import_id
+    // backstop like YNAB, so the heuristic match is the only guard.) Best-
+    // effort: if the pull fails (offline), match against the local copy rather
+    // than failing the whole import.
+    try {
+      await api.sync();
+    } catch (err) {
+      console.warn(
+        "[actual] pre-match sync failed; matching against local copy may miss recent transactions:",
+        err,
+      );
+    }
     const config = getConfig();
     const targetAmount = Math.round(-amount * 100);
 

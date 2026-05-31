@@ -196,6 +196,37 @@ describe("ActualBudgetProvider", () => {
       expect(match).toEqual({ id: "t1" });
     });
 
+    it("pulls a fresh sync before matching, so a txn added on the server after load is still matched (regression: 2026-05-30 duplicate)", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([{ id: "p1", name: "Walmart" }] as any);
+
+      // The candidate exists on the SERVER but is NOT in the local copy until a
+      // sync pulls it — exactly the bank-feed / Actual-web entry case that
+      // produced a duplicate (matcher read a stale local copy).
+      let synced = false;
+      mockApi.sync.mockImplementation(async () => {
+        synced = true;
+      });
+      mockApi.getTransactions.mockImplementation(
+        async () =>
+          (synced
+            ? [{ id: "t1", amount: -9552, date: "2026-01-21", payee: "p1" }]
+            : []) as any,
+      );
+
+      const match = await provider.findMatchingTransaction(
+        "a1",
+        95.52,
+        "2026-01-21",
+        "Walmart",
+      );
+
+      expect(mockApi.sync).toHaveBeenCalled(); // must pull before reading
+      expect(match).toEqual({ id: "t1" }); // → matches, so NO duplicate is created
+    });
+
     it("returns null when amount doesn't match", async () => {
       mockApi.getAccounts.mockResolvedValue([
         { id: "a1", name: "Checking", closed: false, offbudget: false },
