@@ -55,7 +55,7 @@ export default function ReviewFooter({
           onClick={onImport}
           disabled={importDisabled || importing}
         >
-          {importing ? "Importing..." : "Import to YNAB"}
+          {importing ? "Importing..." : "Import"}
         </button>
       </div>
     </div>

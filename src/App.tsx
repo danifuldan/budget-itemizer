@@ -737,7 +737,7 @@ export default function App() {
             <circle className="checkmark-circle" cx="26" cy="26" r="24" fill="none" />
             <path className="checkmark-check" fill="none" d="M15 27l7 7 15-15" />
           </svg>
-          <div className="import-success-text">Imported to YNAB</div>
+          <div className="import-success-text">Imported</div>
         </div>
       </div>
     );
@@ -786,8 +786,8 @@ export default function App() {
           )}
           {hasMissingCategories && !state.error && (
             <WarningBanner
-              title="Category assignment failed for some items"
-              description="The AI couldn't assign categories to some items. Please select them manually before importing."
+              title="Some items aren't categorized"
+              description="A few items couldn't be auto-categorized. They'll import uncategorized — you can set their categories in your budget afterward."
             />
           )}
           <ItemsCard

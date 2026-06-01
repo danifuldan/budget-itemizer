@@ -111,6 +111,27 @@ describe("ActualBudgetProvider", () => {
       ]);
     });
 
+    it("imports uncategorized (no throw) when the item's category isn't in the budget (user: set it later)", async () => {
+      mockApi.getAccounts.mockResolvedValue([
+        { id: "a1", name: "Checking", closed: false, offbudget: false },
+      ] as any);
+      // Budget has only "General" — the receipt's category "Electronics" won't resolve.
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([]);
+      mockApi.createPayee.mockResolvedValue("p1");
+      mockApi.addTransactions.mockResolvedValue(undefined as any);
+
+      await expect(
+        provider.createTransaction("a1", "Amazon", "Electronics", "2026-01-21", "memo", 95.52),
+      ).resolves.toBeUndefined(); // must NOT throw "Category not found"
+
+      const [, txns] = mockApi.addTransactions.mock.calls[0] as [string, any[]];
+      expect(txns[0].amount).toBe(-9552); // full amount preserved
+      expect(txns[0].category).toBeUndefined(); // imported uncategorized
+    });
+
     it("uses buildSubtransactionSplits with tax category resolution", async () => {
       mockApi.getAccounts.mockResolvedValue([
         { id: "a1", name: "Checking", closed: false, offbudget: false },
@@ -146,6 +167,34 @@ describe("ActualBudgetProvider", () => {
           ]),
         }),
       ]);
+    });
+  });
+
+  describe("updateTransactionWithSplits", () => {
+    const setup = () => {
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+      ] as any);
+      mockApi.getPayees.mockResolvedValue([]);
+      mockApi.createPayee.mockResolvedValue("p1");
+      mockApi.updateTransaction.mockResolvedValue(undefined as any);
+      mockApi.sync.mockResolvedValue(undefined as any);
+    };
+
+    it("OMITS category (preserves the matched txn's existing one) when the receipt category doesn't resolve — premortem 2026-06-01 Bug 1", async () => {
+      setup();
+      // "Electronics" isn't in the budget → must NOT clear the existing category.
+      await provider.updateTransactionWithSplits("t1", "Amazon", "Electronics", "memo", 95.52);
+      const [, payload] = mockApi.updateTransaction.mock.calls[0] as [string, any];
+      expect(payload).not.toHaveProperty("category"); // key omitted → existing category left intact
+      expect(payload.payee).toBe("p1");
+    });
+
+    it("sets category when it resolves", async () => {
+      setup();
+      await provider.updateTransactionWithSplits("t1", "Amazon", "General", "memo", 95.52);
+      const [, payload] = mockApi.updateTransaction.mock.calls[0] as [string, any];
+      expect(payload.category).toBe("c1");
     });
   });
 

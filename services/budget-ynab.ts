@@ -677,9 +677,8 @@ export class YnabBudgetProvider implements BudgetProvider {
         (c) => c.name === category,
       )?.id;
 
-      if (!categoryId) {
-        throw new Error("Category not found");
-      }
+      // Unresolved category → leave it uncategorized (the user sets it in
+      // YNAB later) instead of failing the whole import.
     }
 
     await transactions.updateTransaction(budgetId, transactionId, {
@@ -740,9 +739,8 @@ export class YnabBudgetProvider implements BudgetProvider {
         (c) => c.name === category,
       )?.id;
 
-      if (!categoryId) {
-        throw new Error("Category not found");
-      }
+      // Unresolved category → leave it uncategorized (the user sets it in
+      // YNAB later) instead of failing the whole import.
     }
 
     await transactions.createTransaction(budgetId, {

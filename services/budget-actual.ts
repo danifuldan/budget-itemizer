@@ -467,14 +467,24 @@ export class ActualBudgetProvider implements BudgetProvider {
     }
 
     const categoryId = resolveCategoryId(category);
-    if (!categoryId) throw new Error("Category not found");
 
-    await api.updateTransaction(transactionId, {
+    // Only set `category` when it resolved. Omitting the key (vs sending
+    // `undefined`) leaves a MATCHED transaction's EXISTING category intact
+    // instead of clearing it — importing a receipt must never un-categorize a
+    // transaction the bank feed/user already categorized. Premortem 2026-06-01
+    // Bug 1. (A genuinely uncategorized result is still fine; we just don't
+    // overwrite an existing one with "none".)
+    const update: Record<string, unknown> = {
       payee: payeeId,
       cleared: false,
-      category: categoryId,
       notes: memo,
-    } as unknown as Partial<TransactionEntity>);
+    };
+    if (categoryId) update.category = categoryId;
+
+    await api.updateTransaction(
+      transactionId,
+      update as unknown as Partial<TransactionEntity>,
+    );
     await (await loadApi()).sync();
   }
 
@@ -539,8 +549,10 @@ export class ActualBudgetProvider implements BudgetProvider {
     }
 
     if (!subtransactions || subtransactions.length <= 1) {
+      // Unresolved category → import UNCATEGORIZED (the user sets it in the
+      // budget later) rather than blocking the whole import. The amount/total
+      // are unaffected, so reconciliation still holds.
       categoryId = resolveCategoryId(category);
-      if (!categoryId) throw new Error("Category not found");
     }
 
     const transaction: Partial<TransactionEntity> & { subtransactions?: SubtransactionInput[] } = {
