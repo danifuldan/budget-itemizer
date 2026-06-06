@@ -515,6 +515,12 @@ export class ActualBudgetProvider implements BudgetProvider {
           amount: fixedTotal,
           payee: payeeId,
           cleared: original?.cleared ?? false,
+          // Carry the reconciled flag too — the delete-and-recreate would
+          // otherwise silently un-reconcile a transaction the user had marked
+          // reconciled against their bank statement (premortem Bug 2).
+          reconciled:
+            (original as { reconciled?: boolean } | undefined)?.reconciled ??
+            false,
           notes: undefined,
           subtransactions,
         };
@@ -555,10 +561,34 @@ export class ActualBudgetProvider implements BudgetProvider {
         }
 
         // Split is safely in — remove the original single-line transaction so
-        // the receipt total isn't double-counted.
-        await api.deleteTransaction(transactionId);
-        await api.sync();
-        return;
+        // the receipt total isn't double-counted. The split already persisted,
+        // so a failure here (e.g. a transient Actual sync network blip — the
+        // PostError:network-failure we hit on Tailscale) would leave a
+        // DUPLICATE, not a clean rollback. Retry with backoff to ride out a
+        // blip; if it still fails, throw an error that names BOTH ids so the
+        // leftover is actionable and not mistaken for "nothing happened"
+        // (premortem Bug 1).
+        let deleteErr: unknown;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await api.deleteTransaction(transactionId);
+            await api.sync();
+            return;
+          } catch (err) {
+            deleteErr = err;
+            if (attempt < 2) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, 500 * (attempt + 1)),
+              );
+            }
+          }
+        }
+        throw new Error(
+          `Itemized split ${newParentId} was created, but removing the ` +
+            `original transaction ${transactionId} failed after 3 attempts — ` +
+            `the budget now has BOTH. Delete ${transactionId} manually. ` +
+            `Cause: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
+        );
       }
     }
 

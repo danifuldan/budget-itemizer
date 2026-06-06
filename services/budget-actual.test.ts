@@ -234,6 +234,7 @@ describe("ActualBudgetProvider", () => {
         date: "2026-01-21",
         amount: -9552,
         cleared: true,
+        reconciled: true,
         imported_id: "bank-xyz",
         subtransactions: [],
       };
@@ -282,6 +283,7 @@ describe("ActualBudgetProvider", () => {
       expect(parent.date).toBe("2026-01-21");
       expect(parent.amount).toBe(-9552);
       expect(parent.cleared).toBe(true); // inherited from original
+      expect(parent.reconciled).toBe(true); // reconciled state preserved (premortem Bug 2)
       expect(parent.imported_id).toBe("bank-xyz"); // bank identity preserved → no re-import
       expect(parent.subtransactions).toHaveLength(2);
       const sum = parent.subtransactions.reduce((a: number, s: any) => a + s.amount, 0);
@@ -335,6 +337,25 @@ describe("ActualBudgetProvider", () => {
         provider.updateTransactionWithSplits(...splitArgs),
       ).rejects.toThrow(/did not persist/i);
       expect(mockApi.deleteTransaction).not.toHaveBeenCalled(); // original preserved
+    });
+
+    // premortem Bug 1: the split is added BEFORE the original is deleted, so a
+    // delete failure (transient Actual sync network blip) would leave a
+    // duplicate. Retry, and if it still fails throw an error that names both
+    // ids — never a generic failure that reads as a clean rollback.
+    it("retries the delete and, on persistent failure, throws a duplicate-naming error", async () => {
+      setup();
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+        { id: "c2", name: "Electronics", is_income: false, hidden: false },
+      ] as any);
+      mockSplitFlow({ persisted: true }); // split lands + verifies
+      mockApi.deleteTransaction.mockRejectedValue(new Error("network-failure"));
+
+      await expect(
+        provider.updateTransactionWithSplits(...splitArgs),
+      ).rejects.toThrow(/both|manually|t1/i); // names the leftover original
+      expect(mockApi.deleteTransaction).toHaveBeenCalledTimes(3); // retried
     });
   });
 
