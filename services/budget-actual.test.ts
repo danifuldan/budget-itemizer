@@ -14,6 +14,7 @@ vi.mock("@actual-app/api", () => ({
   getTransactions: vi.fn(),
   addTransactions: vi.fn(),
   updateTransaction: vi.fn(),
+  deleteTransaction: vi.fn(),
 }));
 
 // Mock config
@@ -196,6 +197,145 @@ describe("ActualBudgetProvider", () => {
       const [, payload] = mockApi.updateTransaction.mock.calls[0] as [string, any];
       expect(payload.category).toBe("c1");
     });
+
+    // Regression (2026-06-05, real Actual import): @actual-app/api CANNOT turn
+    // an existing transaction into a split in place — updateTransaction drops
+    // `subtransactions`, inserting the children as loose top-level rows ("I got
+    // individual transactions, not a split"). The only API that builds a real
+    // split is addTransactions. So the match path now ADDs a new split that
+    // inherits the original's identity, verifies it persisted, then DELETEs the
+    // original. updateTransaction must never be used for the split.
+    const splitArgs = [
+      "t1",
+      "Amazon",
+      "General",
+      "memo",
+      95.52,
+      [
+        { category: "General", amount: 65.55 },
+        { category: "Electronics", amount: 29.97 },
+      ],
+      "acct-7", // parentAccountId, threaded from findMatchingTransaction
+      "2026-01-21", // parentDate, threaded from findMatchingTransaction
+    ] as const;
+
+    // addTransactions returns the string "ok" (NOT ids), so the provider
+    // assigns the parent id itself and finds it on the verify re-read.
+    // getTransactions is called twice (before=fetch original, after=verify);
+    // this mock returns the original first, then original + the new split whose
+    // id matches whatever the provider passed to addTransactions. `persisted`
+    // controls whether that new split comes back with its children.
+    const mockSplitFlow = ({ persisted }: { persisted: boolean }) => {
+      mockApi.addTransactions.mockResolvedValue("ok" as any);
+      mockApi.deleteTransaction.mockResolvedValue(undefined as any);
+      const original = {
+        id: "t1",
+        account: "acct-7",
+        date: "2026-01-21",
+        amount: -9552,
+        cleared: true,
+        imported_id: "bank-xyz",
+        subtransactions: [],
+      };
+      mockApi.getTransactions.mockImplementation(async () => {
+        const addCall = mockApi.addTransactions.mock.calls[0];
+        if (!addCall) return [original] as any; // before-read
+        const parent = (addCall[1] as any[])[0];
+        const children = persisted
+          ? (parent.subtransactions as any[]).map((c) => ({ ...c, tombstone: 0 }))
+          : [];
+        return [
+          original,
+          {
+            id: parent.id, // the self-assigned id the verify looks for
+            account: "acct-7",
+            date: "2026-01-21",
+            amount: -9552,
+            is_parent: true,
+            subtransactions: children,
+          },
+        ] as any;
+      });
+    };
+
+    it("adds a real split (addTransactions, NOT updateTransaction), inheriting the original's identity", async () => {
+      setup();
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+        { id: "c2", name: "Electronics", is_income: false, hidden: false },
+      ] as any);
+      mockSplitFlow({ persisted: true });
+
+      await provider.updateTransactionWithSplits(...splitArgs);
+
+      // updateTransaction CANNOT make a split — it must not be used here.
+      expect(mockApi.updateTransaction).not.toHaveBeenCalled();
+
+      // addTransactions builds the split: parent in the matched account/date,
+      // with two children carrying amount/category (account/date are filled by
+      // the SDK, so we deliberately do NOT stamp them ourselves).
+      const [acctArg, txns] = mockApi.addTransactions.mock.calls[0] as [string, any[]];
+      expect(acctArg).toBe("acct-7");
+      const parent = txns[0];
+      expect(parent.id).toBeTruthy(); // self-assigned so verify can find it
+      expect(parent.account).toBe("acct-7");
+      expect(parent.date).toBe("2026-01-21");
+      expect(parent.amount).toBe(-9552);
+      expect(parent.cleared).toBe(true); // inherited from original
+      expect(parent.imported_id).toBe("bank-xyz"); // bank identity preserved → no re-import
+      expect(parent.subtransactions).toHaveLength(2);
+      const sum = parent.subtransactions.reduce((a: number, s: any) => a + s.amount, 0);
+      expect(sum).toBe(-9552);
+
+      // The original single-line transaction is removed AFTER the split lands.
+      expect(mockApi.deleteTransaction).toHaveBeenCalledWith("t1");
+    });
+
+    it("fails loudly (no write) when the parent account/date is missing", async () => {
+      setup();
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+        { id: "c2", name: "Electronics", is_income: false, hidden: false },
+      ] as any);
+
+      await expect(
+        provider.updateTransactionWithSplits(
+          "t1",
+          "Amazon",
+          "General",
+          "memo",
+          95.52,
+          [
+            { category: "General", amount: 65.55 },
+            { category: "Electronics", amount: 29.97 },
+          ],
+          undefined, // no account → must throw before touching the budget
+        ),
+      ).rejects.toThrow(/account/i);
+      expect(mockApi.addTransactions).not.toHaveBeenCalled();
+      expect(mockApi.deleteTransaction).not.toHaveBeenCalled();
+    });
+
+    // The bug that made all of this invisible: @actual-app/api LOGS a failed
+    // split insert instead of throwing, so the route returned 200 "Imported"
+    // while the budget was untouched. The post-write re-read must turn that
+    // swallowed failure into a real throw — AND must NOT delete the original,
+    // or we'd destroy the user's transaction for nothing.
+    it("throws (no false success) and keeps the original when the split didn't persist", async () => {
+      setup();
+      mockApi.getCategories.mockResolvedValue([
+        { id: "c1", name: "General", is_income: false, hidden: false },
+        { id: "c2", name: "Electronics", is_income: false, hidden: false },
+      ] as any);
+      // addTransactions "succeeds" (returns "ok") but the re-read shows the new
+      // parent has NO children — exactly the swallowed-insert case.
+      mockSplitFlow({ persisted: false });
+
+      await expect(
+        provider.updateTransactionWithSplits(...splitArgs),
+      ).rejects.toThrow(/did not persist/i);
+      expect(mockApi.deleteTransaction).not.toHaveBeenCalled(); // original preserved
+    });
   });
 
   describe("getAllBudgets", () => {
@@ -233,7 +373,7 @@ describe("ActualBudgetProvider", () => {
         { id: "p1", name: "Walmart Supercenter" },
       ] as any);
       mockApi.getTransactions.mockResolvedValue([
-        { id: "t1", amount: -1299, date: "2026-03-15", payee: "p1" },
+        { id: "t1", amount: -1299, date: "2026-03-15", payee: "p1", account: "a1" },
       ] as any);
 
       const match = await provider.findMatchingTransaction(
@@ -242,7 +382,10 @@ describe("ActualBudgetProvider", () => {
         "2026-03-15",
         "Walmart",
       );
-      expect(match).toEqual({ id: "t1" });
+      // accountId + date are carried so the split-update path can stamp each
+      // child with the parent's account and date (Actual rejects children
+      // without them).
+      expect(match).toEqual({ id: "t1", accountId: "a1", date: "2026-03-15" });
     });
 
     it("pulls a fresh sync before matching, so a txn added on the server after load is still matched (regression: 2026-05-30 duplicate)", async () => {
@@ -261,7 +404,7 @@ describe("ActualBudgetProvider", () => {
       mockApi.getTransactions.mockImplementation(
         async () =>
           (synced
-            ? [{ id: "t1", amount: -9552, date: "2026-01-21", payee: "p1" }]
+            ? [{ id: "t1", amount: -9552, date: "2026-01-21", payee: "p1", account: "a1" }]
             : []) as any,
       );
 
@@ -273,7 +416,7 @@ describe("ActualBudgetProvider", () => {
       );
 
       expect(mockApi.sync).toHaveBeenCalled(); // must pull before reading
-      expect(match).toEqual({ id: "t1" }); // → matches, so NO duplicate is created
+      expect(match).toEqual({ id: "t1", accountId: "a1", date: "2026-01-21" }); // → matches, so NO duplicate is created
     });
 
     it("returns null when amount doesn't match", async () => {

@@ -235,6 +235,71 @@ describe("reducer LOAD_RECEIPT origin (history vs pending)", () => {
   });
 });
 
+// Regression: a direct in-app parse (START_STREAM) must NOT drop the
+// account the user already has selected. The old code spread ...initialState
+// without carrying selectedAccount, so the picker still showed the first
+// account (native <select> default) but the Import gate (!selectedAccount)
+// stayed true — forcing the user to re-pick an already-shown account.
+// ACCOUNTS_LOADED only re-fires on account-list/config change, so it does
+// not heal this; START_STREAM itself must preserve the selection.
+describe("reducer START_STREAM — account selection survives the reset", () => {
+  const file = new File([], "r.pdf", { type: "application/pdf" });
+  const accounts: AccountRef[] = [
+    { id: "acc-1", name: "Checking" },
+    { id: "acc-2", name: "Savings" },
+  ];
+
+  it("keeps a committed (real-default) account through START_STREAM", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts, defaultAccountId: "acc-2" },
+      { type: "START_STREAM", file },
+    ]);
+    expect(s.view).toBe("review");
+    expect(s.selectedAccount).toBe("acc-2"); // not "" — Import stays enabled
+    expect(s.accountIsProvisional).toBe(false);
+  });
+
+  it("keeps a provisional first-account pick through START_STREAM", () => {
+    const s = fold([
+      // No resolvable default -> reducer provisionally fills the first account.
+      { type: "ACCOUNTS_LOADED", accounts, defaultAccountId: "" },
+      { type: "START_STREAM", file },
+    ]);
+    expect(s.selectedAccount).toBe("acc-1");
+    expect(s.accountIsProvisional).toBe(true);
+  });
+
+  // The flow the user actually hit: load a pending/history receipt into
+  // review. LOAD_RECEIPT also spreads ...initialState; it must preserve the
+  // account too, or Import is blocked on an already-shown account.
+  it("keeps the selected account through LOAD_RECEIPT (pending/history load)", () => {
+    const s = fold([
+      { type: "ACCOUNTS_LOADED", accounts, defaultAccountId: "acc-2" },
+      { type: "LOAD_RECEIPT", receipt: historyReceipt, sourceFilename: "w.pdf" } as AppAction,
+    ]);
+    expect(s.view).toBe("review");
+    expect(s.streamDone).toBe(true);
+    expect(s.selectedAccount).toBe("acc-2"); // not "" — Import stays enabled
+  });
+});
+
+// Regression (2026-06-06): a failed import must re-enable the Import button.
+// handleImport dispatches START_IMPORT (importing=true) then STREAM_ERROR on
+// failure; if STREAM_ERROR doesn't clear `importing`, the button stays
+// `disabled={importDisabled || importing}` and the user can't retry. Surfaced
+// by a transient Actual sync network-failure that 500'd the import.
+describe("reducer import failure re-enables the button", () => {
+  it("STREAM_ERROR after START_IMPORT resets the importing flag", () => {
+    const s = fold([
+      { type: "START_IMPORT" },
+      { type: "STREAM_ERROR", error: "Actual sync network-failure" },
+    ]);
+    expect(s.importing).toBe(false); // button re-enabled, retry possible
+    expect(s.error).toBe("Actual sync network-failure");
+    expect(s.streamDone).toBe(true);
+  });
+});
+
 describe("discardTargetFor — history-origin vs pending-origin discard route", () => {
   it("a history-loaded receipt discards via /history/{id}, NOT the pending route", () => {
     const s = fold([

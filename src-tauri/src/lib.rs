@@ -129,9 +129,18 @@ pub fn run() {
                 .max_file_size(5_000_000)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .targets({
-                    let mut targets = vec![Target::new(TargetKind::LogDir { file_name: None })];
+                    let mut targets = vec![
+                        Target::new(TargetKind::LogDir { file_name: None }),
+                        // Stdout in ALL builds (not just dev): a Finder-launched
+                        // .app routes stdout to the macOS unified log, so this is
+                        // what makes `log show` / Console.app surface our logs.
+                        // Previously release builds wrote ONLY the rotating file
+                        // (~/Library/Logs/com.budget-itemizer.desktop/), so the
+                        // unified log was empty and live debugging was blind.
+                        Target::new(TargetKind::Stdout),
+                    ];
                     if cfg!(debug_assertions) {
-                        targets.push(Target::new(TargetKind::Stdout));
+                        // Webview console mirror is dev-only (noise in prod).
                         targets.push(Target::new(TargetKind::Webview));
                     }
                     targets

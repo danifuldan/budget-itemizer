@@ -148,7 +148,10 @@ export interface BudgetProvider {
      *  fingerprint is explicitly NOT a match — two distinct receipts that
      *  happen to share amount+date+merchant can't get conflated. */
     sourceHash?: string,
-  ): Promise<{ id: string } | null>;
+    /** `accountId`/`date` describe the matched transaction. Actual needs both
+     *  to build valid split children on the update path (it inserts each child
+     *  as a full row); YNAB children inherit them so they may be omitted. */
+  ): Promise<{ id: string; accountId?: string; date?: string } | null>;
   updateTransactionWithSplits(
     transactionId: string,
     merchant: string,
@@ -156,6 +159,11 @@ export interface BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    /** The matched transaction's account id and date (from
+     *  findMatchingTransaction). Required by Actual to stamp each split child;
+     *  ignored by YNAB. */
+    parentAccountId?: string,
+    parentDate?: string,
   ): Promise<void>;
   createTransaction(
     accountId: string,

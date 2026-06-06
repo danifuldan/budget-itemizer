@@ -194,26 +194,31 @@ importRoutes.post(
   async (c) => {
     const { account, receipt, sourceFilename } = c.req.valid("json");
 
+    // Only a live watcher/pending entry participates in the import claim.
+    // A history re-import sends the original sourceFilename, but that file
+    // is no longer pending (it was processed and removed), so claimForImport
+    // would find no entry and return false — 409ing EVERY history re-import.
+    // Treat "not in the pending map" like a manual upload: skip the claim,
+    // import anyway (the FE de-dupes via button-disable), and leave the
+    // watcher's move/remove/release paths below untouched. Capture the
+    // entry before the await (and before the claim mutates its status) so a
+    // mid-flight inbox change can't wipe the filePath we need to clean up.
+    const pendingEntry = sourceFilename ? getPending(sourceFilename) : undefined;
+
     // Idempotency: if this import is associated with a watcher pending
     // entry, atomically claim it. A second concurrent call (double-click,
     // network retry) sees the claim and bails before submitting to the
     // budget provider — otherwise it could create a duplicate transaction.
-    // Manual uploads (no sourceFilename) skip the claim and remain
-    // racey at this layer; the FE de-dupes them via button-disable.
-    if (sourceFilename && !claimForImport(sourceFilename)) {
+    // A pending entry that isn't "ready"/"error" (e.g. still parsing) also
+    // fails the claim and correctly surfaces "not ready to import".
+    if (pendingEntry && !claimForImport(sourceFilename!)) {
       return c.json(
         { error: "This receipt is already being imported or is not ready to import." },
         409,
       );
     }
 
-    // Snapshot the source file path *before* the YNAB await. If the user
-    // changes their inbox in Settings mid-flight (which clears most
-    // pending entries), the entry we'd look up after the await could be
-    // wiped — leaving the source file orphaned in the old inbox.
-    // clearAllPending preserves importing-status entries for this exact
-    // reason, but capturing here is cheap defense-in-depth.
-    const claimedFilePath = sourceFilename ? getPending(sourceFilename)?.filePath ?? null : null;
+    const claimedFilePath = pendingEntry?.filePath ?? null;
 
     try {
       await importReceiptToYnab(account, receipt as Receipt);
@@ -232,19 +237,19 @@ importRoutes.post(
       // If this came from the watcher queue, move the file to processed.
       // Use the captured filePath rather than re-reading from the map so
       // we still clean up if the entry was wiped mid-flight.
-      if (sourceFilename && claimedFilePath) {
+      if (pendingEntry && claimedFilePath) {
         try {
-          moveToProcessed(claimedFilePath, sourceFilename);
+          moveToProcessed(claimedFilePath, sourceFilename!);
         } catch (e: any) {
           console.warn(`Could not move source file: ${e.message}`);
         }
-        removePending(sourceFilename);
+        removePending(sourceFilename!);
       }
 
       return c.json({ success: true }, 200);
     } catch (err: any) {
       console.error("Error importing receipt:", err);
-      if (sourceFilename) releaseImportClaim(sourceFilename);
+      if (pendingEntry) releaseImportClaim(sourceFilename!);
       return rateLimitOr500(c, err);
     }
   }

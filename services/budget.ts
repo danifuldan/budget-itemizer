@@ -19,6 +19,8 @@ export const updateTransactionWithSplits = (
   memo: string,
   totalAmount: number,
   splits?: { category: string; amount: number; memo?: string }[],
+  parentAccountId?: string,
+  parentDate?: string,
 ) =>
   getBudgetProvider().updateTransactionWithSplits(
     transactionId,
@@ -27,6 +29,8 @@ export const updateTransactionWithSplits = (
     memo,
     totalAmount,
     splits,
+    parentAccountId,
+    parentDate,
   );
 export const createTransaction = (
   accountName: string,

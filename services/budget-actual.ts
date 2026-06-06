@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { randomUUID } from "node:crypto";
 import { Agent, Dispatcher, setGlobalDispatcher, getGlobalDispatcher } from "undici";
 import type { TransactionEntity } from "@actual-app/api/@types/loot-core/src/types/models";
 import { getConfig } from "./config";
@@ -255,7 +256,7 @@ export class ActualBudgetProvider implements BudgetProvider {
     // accepted to satisfy the BudgetProvider contract but unused here.
     // The YNAB-specific overwrite/silent-drop pathology doesn't apply.
     _sourceHash?: string,
-  ): Promise<{ id: string } | null> {
+  ): Promise<{ id: string; accountId: string; date: string } | null> {
     await ensureBudget();
     const api = await loadApi();
     // Pull the server's latest BEFORE matching. ensureBudget short-circuits
@@ -389,7 +390,9 @@ export class ActualBudgetProvider implements BudgetProvider {
 
     if (allCandidates.length === 0) return null;
 
-    const resolveMostLikely = (pool: Candidate[]): { id: string } | null => {
+    const resolveMostLikely = (
+      pool: Candidate[],
+    ): { id: string; accountId: string; date: string } | null => {
       if (pool.length === 0) return null;
       const sorted = [...pool].sort(
         (a, b) =>
@@ -401,7 +404,15 @@ export class ActualBudgetProvider implements BudgetProvider {
           b.unapproved - a.unapproved ||
           b.noMemo - a.noMemo,
       );
-      return { id: sorted[0].tx.id };
+      // Carry the matched transaction's account AND date: on the update path
+      // Actual inserts each split child as a full transaction row and requires
+      // both explicitly (updateTransaction doesn't auto-propagate them the way
+      // addTransactions does). The importer stamps them onto every child.
+      return {
+        id: sorted[0].tx.id,
+        accountId: sorted[0].tx.account,
+        date: sorted[0].tx.date,
+      };
     };
 
     const preferred = allCandidates.filter((c) => c.isPreferred);
@@ -416,6 +427,14 @@ export class ActualBudgetProvider implements BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    // The account AND date of the transaction being updated. On this path
+    // Actual inserts each split CHILD as a full transaction row and requires
+    // both explicitly — `updateTransaction(id, { subtransactions })` does NOT
+    // inherit them the way `addTransactions(accountId, …)` does, so it rejects
+    // a child with `"account" is required` / `"date" is required`. Both come
+    // from the matcher (findMatchingTransaction → accountId, date).
+    parentAccountId?: string,
+    parentDate?: string,
   ): Promise<void> {
     await ensureBudget();
     const api = await loadApi();
@@ -449,19 +468,96 @@ export class ActualBudgetProvider implements BudgetProvider {
       );
 
       if (resolved.length > 1) {
+        if (!parentAccountId || !parentDate) {
+          // The match path always supplies both; without them we can't build a
+          // valid split or locate the original. Fail loudly rather than write
+          // a partial/orphaned transaction.
+          throw new Error(
+            "Cannot itemize a matched transaction without its account id and date",
+          );
+        }
+
+        // @actual-app/api cannot convert an existing transaction into a split
+        // IN PLACE: updateTransaction only writes the parent's own columns and
+        // silently drops `subtransactions` (it inserts the children as loose
+        // top-level rows, never as a split), and there is no public
+        // batchUpdateTransactions. The ONLY API that builds a real split is
+        // addTransactions (via makeSplitTransaction). So we add a NEW split
+        // that inherits the matched transaction's identity, verify it landed,
+        // then delete the original. Children carry only amount/category/notes —
+        // addTransactions fills each child's account/date/parent_id, exactly
+        // like the create path.
         const subtransactions = resolved.map((r) => ({
           amount: r.amount,
           category: r.categoryId,
           notes: r.memo || undefined,
         }));
 
-        await api.updateTransaction(transactionId, {
+        // Read the original first to inherit the fields that keep a bank feed
+        // from re-importing the replacement (`imported_id`) and preserve its
+        // cleared state. getTransactions on the txn's own date returns it.
+        const before = await api.getTransactions(
+          parentAccountId,
+          parentDate,
+          parentDate,
+        );
+        const original = before.find((t) => t.id === transactionId);
+
+        // Assign the parent id ourselves so we can locate it on the verify
+        // re-read. addTransactions builds `{ id: v4(), ...trans }` (the spread
+        // lets our id win) and returns the string "ok" — NOT the new ids — so
+        // there is no other reliable handle on what it created.
+        const newParentId = randomUUID();
+        const splitParent: Record<string, unknown> = {
+          id: newParentId,
+          account: parentAccountId,
+          date: parentDate,
+          amount: fixedTotal,
           payee: payeeId,
-          cleared: false,
+          cleared: original?.cleared ?? false,
           notes: undefined,
           subtransactions,
-        } as unknown as Partial<TransactionEntity>);
-        await (await loadApi()).sync();
+        };
+        // Preserve bank-import identity so the feed recognizes the replacement
+        // and doesn't re-add the original as a brand-new transaction.
+        const importedId = (original as { imported_id?: string } | undefined)
+          ?.imported_id;
+        if (importedId) splitParent.imported_id = importedId;
+
+        await api.addTransactions(
+          parentAccountId,
+          [splitParent] as unknown as TransactionEntity[],
+          { runTransfers: false },
+        );
+
+        // Verify the split actually persisted BEFORE deleting the original —
+        // @actual-app/api logs insert failures instead of throwing, so a silent
+        // failure must never cause us to delete the original for nothing.
+        // getTransactions uses splits:"grouped", so the parent comes back with
+        // its children nested under `subtransactions`.
+        await api.sync();
+        const after = await api.getTransactions(
+          parentAccountId,
+          parentDate,
+          parentDate,
+        );
+        const newParent = after.find((t) => t.id === newParentId);
+        const persistedChildren = (newParent?.subtransactions ?? []).filter(
+          (s) =>
+            !s.tombstone &&
+            !(s as TransactionEntity & { deleted?: boolean }).deleted,
+        ).length;
+        if (!newParent || persistedChildren !== subtransactions.length) {
+          throw new Error(
+            `Split write did not persist: expected ${subtransactions.length} ` +
+              `subtransactions, found ${persistedChildren}. The budget was not updated.`,
+          );
+        }
+
+        // Split is safely in — remove the original single-line transaction so
+        // the receipt total isn't double-counted.
+        await api.deleteTransaction(transactionId);
+        await api.sync();
         return;
       }
     }

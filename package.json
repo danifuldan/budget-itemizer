@@ -1,6 +1,6 @@
 {
   "name": "budget-itemizer",
-  "version": "0.3.10",
+  "version": "0.3.17",
   "description": "Split and categorize online receipts for YNAB and Actual Budget — free, local, and private.",
   "author": "danifuldan",
   "license": "GPL-3.0-only",

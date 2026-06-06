@@ -160,7 +160,9 @@ export const importReceipt = async (
         receipt.category,
         memo,
         receipt.totalAmount,
-        splits
+        splits,
+        match.accountId,
+        match.date,
       );
     } else {
       console.log(

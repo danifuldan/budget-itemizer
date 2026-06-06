@@ -653,6 +653,11 @@ export class YnabBudgetProvider implements BudgetProvider {
     memo: string,
     totalAmount: number,
     splits?: { category: string; amount: number; memo?: string }[],
+    // Accepted for interface parity with the Actual provider, which needs the
+    // parent account + date to stamp split children. YNAB subtransactions
+    // inherit both from the parent, so these are intentionally unused here.
+    _parentAccountId?: string,
+    _parentDate?: string,
   ): Promise<void> {
     // Snapshot credential + budgetId once (F8b): a key/budget change between
     // the read below and the write must not split this call across two tokens.

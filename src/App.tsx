@@ -140,7 +140,21 @@ export function discardTargetFor(state: AppState): DiscardTarget | null {
 export function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "START_STREAM":
-      return { ...initialState, view: "review", streamStatus: "reading-pdf", lastFile: action.file, sourceFilename: state.sourceFilename };
+      // Preserve the resolved account across the reset, exactly like the
+      // other review-entry cases (RECEIPT_READY_FOR_PENDING,
+      // LOAD_BUFFERED_PROGRESS). Without this, a direct in-app parse wipes
+      // selectedAccount to "" — the picker still shows the first account
+      // (native <select> default) but the Import gate sees no selection, so
+      // the user must re-pick an already-shown account before importing.
+      return {
+        ...initialState,
+        view: "review",
+        streamStatus: "reading-pdf",
+        lastFile: action.file,
+        sourceFilename: state.sourceFilename,
+        selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
+      };
     case "SET_STATUS":
       return { ...state, streamStatus: action.step };
     case "SET_HEADER":
@@ -218,7 +232,14 @@ export function reducer(state: AppState, action: AppAction): AppState {
       };
     }
     case "STREAM_ERROR":
-      return { ...state, error: action.error, streamDone: true, streamStatus: "" };
+      // importing:false is load-bearing for the IMPORT failure path: handleImport
+      // sets importing=true (START_IMPORT) then dispatches STREAM_ERROR on a
+      // failed/raced import. Without resetting it, the Import button stays
+      // `disabled={importDisabled || importing}` forever — a failed import
+      // (e.g. a transient Actual sync network-failure) permanently blocks retry
+      // until the view is reset. (During a parse-stream error importing is
+      // already false, so this is a no-op there.)
+      return { ...state, error: action.error, streamDone: true, streamStatus: "", importing: false };
     case "DELETE_ITEM":
       return { ...state, items: state.items.filter((_, i) => i !== action.index) };
     case "UPDATE_ITEM_CATEGORY":
@@ -292,6 +313,14 @@ export function reducer(state: AppState, action: AppAction): AppState {
         })),
         sourceFilename: action.sourceFilename,
         historyId: action.historyId || null,
+        // Preserve the resolved account across the reset, like every other
+        // review-entry case (START_STREAM, RECEIPT_READY_FOR_PENDING,
+        // LOAD_BUFFERED_PROGRESS). ACCOUNTS_LOADED only re-fires when the
+        // account list / config changes, so it does NOT re-heal a wipe here:
+        // loading a pending/history receipt would zero selectedAccount and
+        // block Import even though the picker still shows the first account.
+        selectedAccount: state.selectedAccount,
+        accountIsProvisional: state.accountIsProvisional,
       };
     case "RECEIPT_READY_FOR_PENDING": {
       // Apply only when viewing the streaming progress for this file and it

@@ -263,6 +263,12 @@ describe("Hono app integration", () => {
 
   it("POST /import is idempotent: a second concurrent call for the same sourceFilename is rejected with 409", async () => {
     // First call gets the claim; second sees `false` and short-circuits.
+    // The claim only runs for a *pending* file, so the entry must exist.
+    vi.mocked(getPending).mockReturnValue({
+      filename: "walmart-receipt.pdf",
+      status: "ready",
+      filePath: "/inbox/walmart-receipt.pdf",
+    } as any);
     vi.mocked(claimForImport).mockReturnValueOnce(true).mockReturnValueOnce(false);
     // Make the YNAB submit slow enough that both requests overlap.
     vi.mocked(importReceiptToYnab).mockImplementation(
@@ -296,6 +302,44 @@ describe("Hono app integration", () => {
     expect(statuses).toEqual([200, 409]);
     // YNAB submit was called exactly once — the duplicate never reached it.
     expect(importReceiptToYnab).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST /import re-imports a history receipt (sourceFilename not pending) WITHOUT a 409", async () => {
+    // Regression: a receipt loaded from history sends its original
+    // sourceFilename, but that file is no longer in the pending map.
+    // claimForImport returns false when there's no pending entry, so the
+    // route used to 409 EVERY history re-import. It must now skip the claim
+    // (like a manual upload) and import, while still recording the real
+    // filename in history (not "manual-upload").
+    vi.mocked(getPending).mockReturnValue(undefined); // not pending => history
+    vi.mocked(importReceiptToYnab).mockResolvedValue(undefined);
+
+    const res = await app.request("/import", {
+      method: "POST",
+      headers: { Authorization: authHeader, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: "Checking",
+        sourceFilename: "Amazon Order Details.pdf",
+        receipt: {
+          merchant: "Amazon",
+          transactionDate: "2024-01-01",
+          memo: "",
+          totalAmount: 95.52,
+          category: "Shopping",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(importReceiptToYnab).toHaveBeenCalledTimes(1);
+    // Claim/watcher machinery is bypassed for a non-pending source.
+    expect(claimForImport).not.toHaveBeenCalled();
+    expect(releaseImportClaim).not.toHaveBeenCalled();
+    expect(removePending).not.toHaveBeenCalled();
+    // ...but the history record still carries the real filename.
+    expect(addRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "Amazon Order Details.pdf", success: true }),
+    );
   });
 
   // Regression: DELETE-vs-POST race used to silently destroy data. A
@@ -613,6 +657,11 @@ describe("Hono app integration", () => {
 
   it("POST /import surfaces YNAB rate-limit as 429 with Retry-After header", async () => {
     const { RateLimitError } = await import("./services/budget-provider");
+    vi.mocked(getPending).mockReturnValue({
+      filename: "walmart-receipt.pdf",
+      status: "ready",
+      filePath: "/inbox/walmart-receipt.pdf",
+    } as any);
     vi.mocked(claimForImport).mockReturnValue(true);
     vi.mocked(importReceiptToYnab).mockRejectedValue(
       new RateLimitError("YNAB rate limit hit.", 60),
@@ -640,6 +689,11 @@ describe("Hono app integration", () => {
   });
 
   it("POST /import releases the import claim if the budget submit throws", async () => {
+    vi.mocked(getPending).mockReturnValue({
+      filename: "walmart-receipt.pdf",
+      status: "ready",
+      filePath: "/inbox/walmart-receipt.pdf",
+    } as any);
     vi.mocked(claimForImport).mockReturnValue(true);
     vi.mocked(importReceiptToYnab).mockRejectedValue(new Error("YNAB unreachable"));
 
