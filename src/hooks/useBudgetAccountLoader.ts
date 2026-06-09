@@ -52,8 +52,11 @@ export interface UseBudgetAccountLoaderReturn {
    *  refresh exposed new accounts). Pass `preferredAccountId` to pin the
    *  selection to a known id (kept if present in the fetched list, else the
    *  first account) instead of preserving the live selection — used on a
-   *  provider switch so a concurrent refresh can't reassign the target. */
-  refreshAccounts: (preferredAccountId?: string) => Promise<void>;
+   *  provider switch so a concurrent refresh can't reassign the target.
+   *  Pass `provider` to read a specific provider's accounts regardless of
+   *  the backend's global config.budgetProvider (a switch hasn't persisted
+   *  it yet) — closes the cross-provider read race. */
+  refreshAccounts: (preferredAccountId?: string, provider?: "ynab" | "actual") => Promise<void>;
 }
 
 /**
@@ -96,10 +99,11 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
   const setBudgets = (next: BudgetSummary[]) => setBudgetsState(next);
   const setSelectedAccount = (account: string) => setSelectedAccountState(account);
 
-  const fetchAccountsFor = async (token: number, preferredAccountId?: string) => {
+  const fetchAccountsFor = async (token: number, preferredAccountId?: string, provider?: "ynab" | "actual") => {
     setError("");
     try {
-      const accts = await apiFetch<AccountRef[]>("/accounts");
+      const providerQuery = provider ? `?provider=${provider}` : "";
+      const accts = await apiFetch<AccountRef[]>(`/accounts${providerQuery}`);
       if (inflightRef.current !== token) return; // stale — drop
       setAccounts(accts);
       // Decide the selection from `preferredAccountId` when the caller gave
@@ -117,7 +121,7 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
       });
 
       if (loadAllAccounts) {
-        const all = await apiFetch<AccountRef[]>("/accounts?all=true");
+        const all = await apiFetch<AccountRef[]>(`/accounts?all=true${provider ? `&provider=${provider}` : ""}`);
         if (inflightRef.current !== token) return;
         setAllAccounts(all);
       }
@@ -155,10 +159,10 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
     if (inflightRef.current === token) setLoadingAccounts(false);
   };
 
-  const refreshAccounts = async (preferredAccountId?: string): Promise<void> => {
+  const refreshAccounts = async (preferredAccountId?: string, provider?: "ynab" | "actual"): Promise<void> => {
     setLoadingAccounts(true);
     const token = ++inflightRef.current;
-    await fetchAccountsFor(token, preferredAccountId);
+    await fetchAccountsFor(token, preferredAccountId, provider);
     if (inflightRef.current === token) setLoadingAccounts(false);
   };
 

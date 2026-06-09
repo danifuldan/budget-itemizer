@@ -38,15 +38,18 @@ test("settings: rapid provider toggling settles the saved account", async ({ pag
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true }) });
     }
   });
-  await page.route("**/budgets", (route) => {
-    const list = provider === "ynab" ? [{ id: "ynab-budget-1", name: "Test Budget" }] : [{ id: "actual-sync-1", name: "My Finances" }];
+  // Keyed off the `?provider=` query (the frontend sends it on switch), with
+  // a config-active fallback for mount reads — so the response never depends
+  // on /config POST ordering. This is the decoupling under test.
+  const providerOf = (url: string) => new URL(url).searchParams.get("provider") || provider;
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
+    const list = providerOf(route.request().url()) === "ynab" ? [{ id: "ynab-budget-1", name: "Test Budget" }] : [{ id: "actual-sync-1", name: "My Finances" }];
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(list) });
   });
-  const accountsFor = () => provider === "ynab"
+  const accountsFor = (url: string) => providerOf(url) === "ynab"
     ? [{ id: "acct-1", name: "Checking" }, { id: "acct-2", name: "Savings" }]
     : [{ id: "a-1", name: "Actual A" }];
-  await page.route("**/accounts?all=true", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
-  await page.route("**/accounts", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
+  await page.route(/\/accounts(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor(r.request().url())) }));
 
   await page.goto("/");
   const gear = page.getByRole("button", { name: /settings/i }).first();

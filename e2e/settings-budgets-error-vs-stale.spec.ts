@@ -55,8 +55,11 @@ test("settings: budget-load error is suppressed when a budget is already shown",
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true }) });
     }
   });
-  await page.route("**/budgets", (route) => {
-    if (provider === "actual") {
+  // Keyed off the `?provider=` query (frontend sends it), config-active
+  // fallback for mount reads.
+  const providerOf = (url: string) => new URL(url).searchParams.get("provider") || provider;
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
+    if (providerOf(route.request().url()) === "actual") {
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "actual-sync-1", name: "My Finances" }]) });
       return;
     }
@@ -68,9 +71,8 @@ test("settings: budget-load error is suppressed when a budget is already shown",
       route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "upstream 500" }) });
     }
   });
-  const accountsFor = () => provider === "ynab" ? [{ id: "acct-1", name: "Checking" }] : [{ id: "a-1", name: "Actual A" }];
-  await page.route("**/accounts?all=true", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
-  await page.route("**/accounts", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
+  const accountsFor = (url: string) => providerOf(url) === "ynab" ? [{ id: "acct-1", name: "Checking" }] : [{ id: "a-1", name: "Actual A" }];
+  await page.route(/\/accounts(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor(r.request().url())) }));
 
   await page.goto("/");
   const gear = page.getByRole("button", { name: /settings/i }).first();

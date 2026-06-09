@@ -73,7 +73,8 @@ test("settings: Actual Test Connection shows Connected and populates the budget 
   });
 
   // Fetched once on Settings open (loader's list; the Actual UI uses its own).
-  await page.route("**/budgets", (route) => {
+  // Regex matcher so the `?provider=` query suffix is matched.
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
   });
 
@@ -93,10 +94,7 @@ test("settings: Actual Test Connection shows Connected and populates the budget 
     });
   });
 
-  await page.route("**/accounts?all=true", (route) => {
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(["Checking", "Savings"]) });
-  });
-  await page.route("**/accounts", (route) => {
+  await page.route(/\/accounts(\?.*)?$/, (route) => {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(["Checking", "Savings"]) });
   });
 

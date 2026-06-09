@@ -265,7 +265,10 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // write the wrong provider's budgets. Drop stale responses via a
     // monotonic token (same guard the loader uses for /accounts).
     const token = ++budgetsInflight.current;
-    apiFetch<{ id: string; name: string }[]>("/budgets")
+    // Query the provider explicitly so the read targets it regardless of the
+    // backend's global config.budgetProvider (which a concurrent switch may
+    // not have updated yet) — no cross-provider list under a rapid switch.
+    apiFetch<{ id: string; name: string }[]>(`/budgets?provider=${provider}`)
       .then((data) => {
         if (budgetsInflight.current !== token) return;
         if (provider === "ynab") budgetAccountLoader.setBudgets(data);
@@ -300,11 +303,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // provider that was active when Settings opened. Without this the
     // budget select falls back to the raw saved id until Test Connection.
     primeBudgets(provider);
-    // Pass the saved account explicitly so the refresh doesn't reassign the
-    // import target from a `prev` that a concurrent switch's refresh may
-    // have polluted (rapid toggling). Each refresh keeps the saved account
-    // if present in its provider's list, else falls back to the first.
-    if (restoredBudgetId) budgetAccountLoader.refreshAccounts(config.ynabAccountId || "");
+    // Pass the saved account AND the target provider explicitly: the account
+    // pins the selection (a concurrent refresh can't reassign the import
+    // target), and the provider makes /accounts read THIS provider regardless
+    // of the backend's global flag — together they close the rapid-switch
+    // read race for both the selection and the account list.
+    if (restoredBudgetId) budgetAccountLoader.refreshAccounts(config.ynabAccountId || "", provider);
   };
 
   const handleSave = async () => {

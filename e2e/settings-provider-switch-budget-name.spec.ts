@@ -74,16 +74,17 @@ test("settings: switching provider shows the budget name, not the raw id", async
     }
   });
 
-  // /budgets returns the ACTIVE provider's budgets.
-  await page.route("**/budgets", (route) => {
-    const list = provider === "ynab"
+  // /budgets returns the provider named in the `?provider=` query (the
+  // frontend sends it on switch), falling back to the config-active provider
+  // for mount reads that omit it — modeling the real backend.
+  const providerOf = (url: string) => new URL(url).searchParams.get("provider") || provider;
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
+    const list = providerOf(route.request().url()) === "ynab"
       ? [{ id: "ynab-budget-1", name: "Test Budget" }]
       : [{ id: "actual-sync-1", name: "My Finances" }];
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(list) });
   });
-  await page.route("**/accounts?all=true", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(["Checking", "Savings"]) }));
-  await page.route("**/accounts", (route) =>
+  await page.route(/\/accounts(\?.*)?$/, (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(["Checking", "Savings"]) }));
 
   await page.goto("/");

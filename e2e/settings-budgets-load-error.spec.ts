@@ -50,8 +50,9 @@ test("settings: a failed budgets fetch surfaces an error, recovers on Test Conne
     }
   });
 
-  // /budgets fails until Test Connection "fixes" it.
-  await page.route("**/budgets", (route) => {
+  // /budgets fails until Test Connection "fixes" it. Regex matcher to catch
+  // the `?provider=` query; this spec doesn't switch providers.
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
     if (budgetsShouldFail) {
       route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "upstream 500" }) });
     } else {
@@ -63,8 +64,7 @@ test("settings: a failed budgets fetch surfaces an error, recovers on Test Conne
     budgetsShouldFail = false;
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, budgets: [{ id: "ynab-budget-1", name: "Test Budget" }] }) });
   });
-  await page.route("**/accounts?all=true", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "acct-1", name: "Checking" }]) }));
-  await page.route("**/accounts", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "acct-1", name: "Checking" }]) }));
+  await page.route(/\/accounts(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "acct-1", name: "Checking" }]) }));
 
   await page.goto("/");
   const gear = page.getByRole("button", { name: /settings/i }).first();

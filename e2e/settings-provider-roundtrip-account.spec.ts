@@ -57,19 +57,21 @@ test("settings: default account survives a provider round-trip", async ({ page }
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true }) });
     }
   });
-  await page.route("**/budgets", (route) => {
-    const list = provider === "ynab"
+  // Keyed off the `?provider=` query (frontend sends it on switch), falling
+  // back to the config-active provider for mount reads that omit it.
+  const providerOf = (url: string) => new URL(url).searchParams.get("provider") || provider;
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
+    const list = providerOf(route.request().url()) === "ynab"
       ? [{ id: "ynab-budget-1", name: "Test Budget" }]
       : [{ id: "actual-sync-1", name: "My Finances" }];
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(list) });
   });
   // Provider-aware accounts (proper AccountRef objects). The YNAB saved
   // account "acct-2" is intentionally NOT the first one.
-  const accountsFor = () => provider === "ynab"
+  const accountsFor = (url: string) => providerOf(url) === "ynab"
     ? [{ id: "acct-1", name: "Checking" }, { id: "acct-2", name: "Savings" }]
     : [{ id: "a-1", name: "Actual A" }];
-  await page.route("**/accounts?all=true", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
-  await page.route("**/accounts", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor()) }));
+  await page.route(/\/accounts(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accountsFor(r.request().url())) }));
 
   await page.goto("/");
   const gear = page.getByRole("button", { name: /settings/i }).first();

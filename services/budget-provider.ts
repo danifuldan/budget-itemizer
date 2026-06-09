@@ -223,13 +223,30 @@ let _cachedType: string = "";
 import { YnabBudgetProvider } from "./budget-ynab";
 import { ActualBudgetProvider } from "./budget-actual";
 
-export const getBudgetProvider = (): BudgetProvider => {
-  const config = getConfig();
-  const type = config.budgetProvider || "ynab";
+/**
+ * Resolve a budget provider. With no argument, returns the cached provider
+ * for the config-active `budgetProvider` (the normal path). With an explicit
+ * `requestedType`, returns a provider of THAT type regardless of the global
+ * flag — used by read endpoints (`/budgets`, `/accounts`) so a settings
+ * provider switch reads the intended provider's data and can't race the
+ * global `config.budgetProvider` write.
+ *
+ * Providers source their budget id from per-provider config fields
+ * (`ynabBudgetId` / `actualSyncId`), independent of the global flag, so an
+ * off-config provider reads correctly. An off-config request builds a
+ * transient instance: it must NOT populate or evict the shared cache (that
+ * belongs to the config-active provider used by the import path).
+ */
+export const getBudgetProvider = (requestedType?: "ynab" | "actual"): BudgetProvider => {
+  const configType = getConfig().budgetProvider || "ynab";
+  const type = requestedType ?? configType;
   if (_cached && _cachedType === type) return _cached;
-  _cached = type === "actual" ? new ActualBudgetProvider() : new YnabBudgetProvider();
-  _cachedType = type;
-  return _cached;
+  const provider = type === "actual" ? new ActualBudgetProvider() : new YnabBudgetProvider();
+  if (type === configType) {
+    _cached = provider;
+    _cachedType = type;
+  }
+  return provider;
 };
 
 export const resetBudgetProvider = async () => {

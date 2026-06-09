@@ -97,6 +97,33 @@ describe("getBudgetProvider", () => {
     expect(actual.id).toBe("actual");
     expect(actual).not.toBe(ynab);
   });
+
+  // Provider-explicit reads (settings switch): an explicit type returns THAT
+  // provider regardless of the config-active flag, so a /budgets or /accounts
+  // read can't race the global budgetProvider write.
+  it("returns the explicitly-requested provider regardless of config", () => {
+    mockedGetConfig.mockReturnValue({ budgetProvider: "actual" } as any);
+    expect(getBudgetProvider("ynab").id).toBe("ynab");
+    expect(getBudgetProvider("actual").id).toBe("actual");
+  });
+
+  it("an off-config explicit request neither caches itself nor evicts the active provider", () => {
+    mockedGetConfig.mockReturnValue({ budgetProvider: "actual" } as any);
+    const active = getBudgetProvider();            // cached actual
+    const offConfig = getBudgetProvider("ynab");   // transient ynab
+    expect(offConfig.id).toBe("ynab");
+    // The shared cache still holds the config-active provider untouched.
+    expect(getBudgetProvider()).toBe(active);
+    // And a repeat off-config request is a fresh instance (not cached).
+    expect(getBudgetProvider("ynab")).not.toBe(offConfig);
+  });
+
+  it("an explicit request matching the config type uses the shared cache", () => {
+    mockedGetConfig.mockReturnValue({ budgetProvider: "ynab" } as any);
+    const a = getBudgetProvider("ynab");
+    const b = getBudgetProvider();
+    expect(a).toBe(b);
+  });
 });
 
 describe("resetBudgetProvider", () => {

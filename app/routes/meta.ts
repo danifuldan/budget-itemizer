@@ -12,10 +12,17 @@ import {
 
 const meta = new Hono();
 
+// `?provider=ynab|actual` reads that provider explicitly (settings switch),
+// independent of the global config.budgetProvider; anything else falls back
+// to the config-active provider.
+const readProviderQuery = (raw: string | undefined): "ynab" | "actual" | undefined =>
+  raw === "ynab" || raw === "actual" ? raw : undefined;
+
 meta.get("/budgets", auth, async (c) => {
   try {
     const { getBudgetProvider } = await import("../../services/budget-provider");
-    const budgets = await getBudgetProvider().getAllBudgets();
+    const provider = readProviderQuery(c.req.query("provider"));
+    const budgets = await getBudgetProvider(provider).getAllBudgets();
     return c.json(budgets, 200);
   } catch (err: any) {
     return rateLimitOr500(c, err);
@@ -24,7 +31,8 @@ meta.get("/budgets", auth, async (c) => {
 
 meta.get("/accounts", auth, async (c) => {
   try {
-    const all = await getAllAccounts();
+    const provider = readProviderQuery(c.req.query("provider"));
+    const all = await getAllAccounts(provider);
     const showAll = c.req.query("all") === "true";
     if (showAll) return c.json(all, 200);
     const hidden = getConfig().hiddenAccounts;

@@ -97,22 +97,17 @@ test("settings: save settings POSTs /config with active provider's budget id", a
     }
   });
 
-  // /budgets and /accounts for the settings dropdowns.
-  await page.route("**/budgets", (route) => {
+  // /budgets and /accounts for the settings dropdowns. Regex matchers so
+  // the new `?provider=` query suffix is matched; this spec doesn't switch
+  // providers, so the responses ignore it.
+  await page.route(/\/budgets(\?.*)?$/, (route) => {
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify([{ id: "saved-budget-id", name: "Main Budget" }]),
     });
   });
-  await page.route("**/accounts?all=true", (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(["Checking", "Savings"]),
-    });
-  });
-  await page.route("**/accounts", (route) => {
+  await page.route(/\/accounts(\?.*)?$/, (route) => {
     route.fulfill({
       status: 200,
       contentType: "application/json",
