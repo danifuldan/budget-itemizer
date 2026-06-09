@@ -49,8 +49,11 @@ export interface UseBudgetAccountLoaderReturn {
    *  call's accounts. */
   selectBudget: (id: string) => Promise<void>;
   /** Re-fetch accounts for the current budget id (e.g. after a token
-   *  refresh exposed new accounts). */
-  refreshAccounts: () => Promise<void>;
+   *  refresh exposed new accounts). Pass `preferredAccountId` to pin the
+   *  selection to a known id (kept if present in the fetched list, else the
+   *  first account) instead of preserving the live selection — used on a
+   *  provider switch so a concurrent refresh can't reassign the target. */
+  refreshAccounts: (preferredAccountId?: string) => Promise<void>;
 }
 
 /**
@@ -93,13 +96,25 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
   const setBudgets = (next: BudgetSummary[]) => setBudgetsState(next);
   const setSelectedAccount = (account: string) => setSelectedAccountState(account);
 
-  const fetchAccountsFor = async (token: number) => {
+  const fetchAccountsFor = async (token: number, preferredAccountId?: string) => {
     setError("");
     try {
       const accts = await apiFetch<AccountRef[]>("/accounts");
       if (inflightRef.current !== token) return; // stale — drop
       setAccounts(accts);
-      if (accts.length > 0) setSelectedAccountState(accts[0].id);
+      // Decide the selection from `preferredAccountId` when the caller gave
+      // one (a provider switch knows the saved account and must not trust a
+      // `prev` that a concurrent refresh may have polluted); otherwise
+      // preserve the live selection. Keep the target if it's present in the
+      // fetched list, else fall back to the first account. selectBudget
+      // clears the selection to "" first, so a freshly-picked budget still
+      // lands on its first account. An empty list leaves the selection
+      // untouched — a transient empty reply must not blank the saved account.
+      setSelectedAccountState((prev) => {
+        if (accts.length === 0) return prev;
+        const want = preferredAccountId !== undefined ? preferredAccountId : prev;
+        return want && accts.some((a) => a.id === want) ? want : accts[0].id;
+      });
 
       if (loadAllAccounts) {
         const all = await apiFetch<AccountRef[]>("/accounts?all=true");
@@ -140,10 +155,10 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
     if (inflightRef.current === token) setLoadingAccounts(false);
   };
 
-  const refreshAccounts = async (): Promise<void> => {
+  const refreshAccounts = async (preferredAccountId?: string): Promise<void> => {
     setLoadingAccounts(true);
     const token = ++inflightRef.current;
-    await fetchAccountsFor(token);
+    await fetchAccountsFor(token, preferredAccountId);
     if (inflightRef.current === token) setLoadingAccounts(false);
   };
 

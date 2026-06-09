@@ -127,6 +127,10 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
   // either YNAB or Actual budgets, not both).
   const [actualBudgetList, setActualBudgetList] = useState<{ id: string; name: string }[]>([]);
 
+  // Non-empty when the most recent /budgets fetch failed, so the dropdown
+  // shows "couldn't load" rather than a misleading empty "No budgets found".
+  const [budgetsError, setBudgetsError] = useState("");
+
   // budgetAccountLoader is declared first so the test hooks below can
   // reference it via closure in their onTested callbacks. The
   // budgetIdField dynamically tracks the active provider — selectBudget
@@ -158,6 +162,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     onTested: async (result) => {
       if (!result.success || !result.budgets) return;
       budgetAccountLoader.setBudgets(result.budgets);
+      setBudgetsError(""); // a successful test recovered the budget list
       // Settings's auto-select rule: keep the user's existing budget
       // if it's still in the list; otherwise pick the first.
       const currentValid = result.budgets.some((b) => b.id === budgetAccountLoader.state.selectedBudgetId);
@@ -174,6 +179,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     onTested: async (result, budgets) => {
       if (!result.success || budgets.length === 0) return;
       setActualBudgetList(budgets);
+      setBudgetsError(""); // a successful test recovered the budget list
       const currentValid = budgets.some((b) => b.id === budgetAccountLoader.state.selectedBudgetId);
       const budgetId = currentValid ? budgetAccountLoader.state.selectedBudgetId : budgets[0]?.id || "";
       if (budgetId) {
@@ -202,6 +208,10 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
   // Ref to ensure we only initialize from config once
   const initialized = useRef(false);
 
+  // Monotonic token so a stale /budgets response (from a prior provider
+  // switch) can't overwrite the current provider's budget list.
+  const budgetsInflight = useRef(0);
+
   // Populate fields from config ONCE when it first loads. Model + budget
   // bootstrap is owned by hooks; this effect only seeds the rest.
   useEffect(() => {
@@ -224,11 +234,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
 
     // Pre-populate the budget dropdown so the user sees their saved
     // budget by name (not just id) before clicking Test Connection.
-    // /budgets fails silently if creds aren't set yet — that's the
-    // first-run state where the wizard hasn't completed.
-    apiFetch<{ id: string; name: string }[]>("/budgets")
-      .then((data) => budgetAccountLoader.setBudgets(data))
-      .catch(() => {});
+    primeBudgets(config.budgetProvider || "ynab");
 
     // If a budget is already saved, prime the accounts dropdowns too.
     // refreshAccounts hits /accounts (and /accounts?all=true since
@@ -241,6 +247,39 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, config]);
+
+  // Fetch the ACTIVE provider's budgets so the dropdown renders saved
+  // budgets by name (not raw id) without a Test Connection click. /budgets
+  // resolves against the backend's active provider (getBudgetProvider), so
+  // callers must ensure config.budgetProvider is already updated first, and
+  // we route the result into the matching dropdown source (the ynab loader
+  // vs actualBudgetList). Fails silently when creds aren't set yet — the
+  // first-run state where the wizard hasn't completed.
+  const primeBudgets = (provider: "ynab" | "actual") => {
+    // Clear any prior error up front so a failed provider's message can't
+    // linger under a newly-active healthy provider while its fetch is in
+    // flight (budgetsError is shared across both provider blocks).
+    setBudgetsError("");
+    // /budgets resolves against the backend's *live* provider, so a slow
+    // response from a prior switch could land after a newer switch and
+    // write the wrong provider's budgets. Drop stale responses via a
+    // monotonic token (same guard the loader uses for /accounts).
+    const token = ++budgetsInflight.current;
+    apiFetch<{ id: string; name: string }[]>("/budgets")
+      .then((data) => {
+        if (budgetsInflight.current !== token) return;
+        if (provider === "ynab") budgetAccountLoader.setBudgets(data);
+        else setActualBudgetList(data);
+        setBudgetsError("");
+      })
+      .catch(() => {
+        if (budgetsInflight.current !== token) return;
+        // Don't leave the user staring at "No budgets found" for a fetch
+        // that actually failed — Test Connection re-fetches with the
+        // entered creds, so point them there.
+        setBudgetsError("Couldn't load budgets. Test Connection to retry.");
+      });
+  };
 
   const handleProviderChange = async (provider: "ynab" | "actual") => {
     setBudgetProvider(provider);
@@ -256,6 +295,16 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     budgetAccountLoader.setSelectedBudgetId(restoredBudgetId);
     budgetAccountLoader.setSelectedAccount(config.ynabAccountId || "");
     await apiPost("/config", { budgetProvider: provider });
+    // Backend is now on the new provider, so re-fetch ITS budgets (and,
+    // if one is saved, accounts) — the mount-time prime only ran for the
+    // provider that was active when Settings opened. Without this the
+    // budget select falls back to the raw saved id until Test Connection.
+    primeBudgets(provider);
+    // Pass the saved account explicitly so the refresh doesn't reassign the
+    // import target from a `prev` that a concurrent switch's refresh may
+    // have polluted (rapid toggling). Each refresh keeps the saved account
+    // if present in its provider's list, else falls back to the first.
+    if (restoredBudgetId) budgetAccountLoader.refreshAccounts(config.ynabAccountId || "");
   };
 
   const handleSave = async () => {
@@ -397,12 +446,17 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                 <select id="settings-ynab-budget" className="select" value={ynabBudgetId} onChange={(e) => budgetAccountLoader.selectBudget(e.target.value)}>
                   {budgets.length === 0 && <option value="">No budgets found</option>}
                   {budgets.length > 0 && !budgets.some((b) => b.id === ynabBudgetId) && ynabBudgetId && (
-                    <option value={ynabBudgetId}>{ynabBudgetId}</option>
+                    // The loaded budget list doesn't contain the saved id
+                    // (renamed/deleted budget, or wrong account). We have no
+                    // name to show — surface that honestly instead of
+                    // leaking the raw UUID into the UI.
+                    <option value={ynabBudgetId}>Saved budget not found</option>
                   )}
                   {budgets.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
+                {budgetsError && budgets.length === 0 && <span className="test-result error">{budgetsError}</span>}
               </div>
               <div className="test-connection">
                 <button
@@ -497,6 +551,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
+                {budgetsError && actualBudgetList.length === 0 && <span className="test-result error">{budgetsError}</span>}
               </div>
             </>
           )}

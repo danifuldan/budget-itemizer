@@ -141,6 +141,82 @@ describe("useBudgetAccountLoader", () => {
     expect(result.current.state.accounts).toEqual(refs(["new", "NEW"]));
   });
 
+  // Regression (premortem Bug 1): refreshAccounts must NOT clobber an
+  // already-selected account that is still present in the refreshed list.
+  // The settings provider round-trip relies on this — switching away and
+  // back re-fetches accounts, and the saved Default Account (which the
+  // import targets) must survive rather than snapping to the first one.
+  it("refreshAccounts preserves an already-selected account that's still present", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"], ["acc-2", "Savings"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "ynabBudgetId",
+      initialSelectedAccount: "acc-2",
+    }));
+
+    await act(async () => { await result.current.refreshAccounts(); });
+
+    expect(result.current.state.selectedAccount).toBe("acc-2");
+  });
+
+  // Regression (premortem round 2, Bug 2): an empty /accounts response
+  // must NOT wipe an existing selection. Otherwise a transient empty reply
+  // from the 30s focus-refresh blanks the Default Account, and the next
+  // good refresh then snaps it to the first account.
+  it("refreshAccounts preserves the selection when /accounts returns empty", async () => {
+    mockApiFetch.mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "ynabBudgetId",
+      initialSelectedAccount: "acct-2",
+    }));
+
+    await act(async () => { await result.current.refreshAccounts(); });
+
+    expect(result.current.state.selectedAccount).toBe("acct-2");
+  });
+
+  it("refreshAccounts re-selects the first account when the prior selection is gone", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"], ["acc-2", "Savings"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "ynabBudgetId",
+      initialSelectedAccount: "acc-removed",
+    }));
+
+    await act(async () => { await result.current.refreshAccounts(); });
+
+    expect(result.current.state.selectedAccount).toBe("acc-1");
+  });
+
+  // Regression (premortem round 3, Bug 1): refreshAccounts(preferred) must
+  // honor the explicitly-passed account, not a live (pollutable) selection.
+  // Rapid provider switches can leave `selectedAccount` holding another
+  // provider's account id; passing the desired id makes the result
+  // deterministic regardless of that pollution.
+  it("refreshAccounts(preferred) selects the preferred account over the live selection", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acct-1", "Checking"], ["acct-2", "Savings"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "ynabBudgetId",
+      initialSelectedAccount: "polluted-from-other-provider",
+    }));
+
+    await act(async () => { await result.current.refreshAccounts("acct-2"); });
+
+    expect(result.current.state.selectedAccount).toBe("acct-2");
+  });
+
+  it("refreshAccounts(preferred) falls back to the first account when preferred is absent", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acct-1", "Checking"], ["acct-2", "Savings"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "ynabBudgetId",
+      initialSelectedAccount: "acct-2",
+    }));
+
+    // Preferred id isn't in this provider's list (e.g. a YNAB account id
+    // passed while Actual accounts loaded) → first account.
+    await act(async () => { await result.current.refreshAccounts("not-here"); });
+
+    expect(result.current.state.selectedAccount).toBe("acct-1");
+  });
+
   it("refreshAccounts re-fetches without changing the budget id", async () => {
     mockApiFetch.mockResolvedValueOnce(refs(["a", "A"], ["b", "B"]));
     const { result } = renderHook(() => useBudgetAccountLoader({
