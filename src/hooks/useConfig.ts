@@ -23,7 +23,8 @@ export interface ConfigData {
   watcherFocusApp: boolean;
   minimizeToTray: boolean;
   matchAcrossAccounts: boolean;
-  hiddenAccounts: string[];
+  ynabHiddenAccounts: string[];
+  actualHiddenAccounts: string[];
   discountMode: "distribute" | "credit";
 }
 
@@ -46,7 +47,8 @@ const defaultConfig: ConfigData = {
   watcherFocusApp: false,
   minimizeToTray: true,
   matchAcrossAccounts: true,
-  hiddenAccounts: [] as string[],
+  ynabHiddenAccounts: [] as string[],
+  actualHiddenAccounts: [] as string[],
   discountMode: "distribute" as const,
 };
 

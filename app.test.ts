@@ -43,7 +43,9 @@ vi.mock("./services/config", () => ({
     watcherFocusApp: true,
     minimizeToTray: true,
     matchAcrossAccounts: true,
-    hiddenAccounts: [],
+    budgetProvider: "ynab",
+    ynabHiddenAccounts: [],
+    actualHiddenAccounts: [],
   })),
   saveConfig: vi.fn((updates: any) => ({ ...updates })),
   isSetupComplete: vi.fn(() => true),
@@ -161,9 +163,10 @@ describe("Hono app integration", () => {
     ]);
   });
 
-  // The disagreement: hiddenAccounts now stores stable account IDs, not
-  // display names. A renamed account whose ID is hidden must stay hidden.
-  it("GET /accounts hides accounts whose ID is in hiddenAccounts", async () => {
+  // The disagreement: the hidden list stores stable account IDs, not display
+  // names. A renamed account whose ID is hidden must stay hidden. Now keyed
+  // per-provider — the active provider (ynab) reads ynabHiddenAccounts.
+  it("GET /accounts hides accounts whose ID is in the active provider's hidden list", async () => {
     vi.mocked(getAllAccounts).mockResolvedValue([
       { id: "acc-1", name: "Checking" },
       { id: "acc-2", name: "Renamed Savings" },
@@ -171,7 +174,9 @@ describe("Hono app integration", () => {
     // Override every getConfig call for this test (auth middleware reads
     // getConfig too). appApiKey:"" falls auth through to the env mock.
     vi.mocked(getConfig).mockReturnValue({
-      hiddenAccounts: ["acc-2"],
+      budgetProvider: "ynab",
+      ynabHiddenAccounts: ["acc-2"],
+      actualHiddenAccounts: [],
       appApiKey: "",
       appApiSecret: "",
     } as any);
@@ -183,17 +188,19 @@ describe("Hono app integration", () => {
     expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
   });
 
-  // Premortem Bug 2: on first post-upgrade launch hiddenAccounts still
-  // holds NAMES (the async startup migration hasn't reconciled them yet).
-  // The filter must keep them hidden until migration lands — otherwise
-  // previously-hidden accounts reappear in the dropdown.
-  it("GET /accounts also hides accounts whose NAME is in (un-migrated) hiddenAccounts", async () => {
+  // On first post-upgrade launch ynabHiddenAccounts can still hold NAMES
+  // (the async startup migration hasn't reconciled them to ids yet). The
+  // by-name match keeps them hidden until migration lands — but only within
+  // YNAB's own accounts.
+  it("GET /accounts also hides accounts whose NAME is in (un-migrated) ynabHiddenAccounts", async () => {
     vi.mocked(getAllAccounts).mockResolvedValue([
       { id: "acc-1", name: "Checking" },
       { id: "acc-2", name: "Bank of America" },
     ] as any);
     vi.mocked(getConfig).mockReturnValue({
-      hiddenAccounts: ["Bank of America"], // a NAME, not an id
+      budgetProvider: "ynab",
+      ynabHiddenAccounts: ["Bank of America"], // a NAME, not an id
+      actualHiddenAccounts: [],
       appApiKey: "",
       appApiSecret: "",
     } as any);
@@ -203,6 +210,33 @@ describe("Hono app integration", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual([{ id: "acc-1", name: "Checking" }]);
+  });
+
+  // The fix's core guarantee: a name hidden under ONE provider must not hide
+  // a same-named account on the OTHER provider. /accounts?provider=actual
+  // reads actualHiddenAccounts only — a YNAB name-entry can't leak across.
+  it("GET /accounts?provider=actual does not hide a same-named account from ynabHiddenAccounts", async () => {
+    vi.mocked(getAllAccounts).mockResolvedValue([
+      { id: "act-1", name: "Checking" },
+      { id: "act-2", name: "Bank of America" }, // same name as a YNAB hidden entry
+    ] as any);
+    vi.mocked(getConfig).mockReturnValue({
+      budgetProvider: "ynab", // active provider is YNAB; the query overrides for the read
+      ynabHiddenAccounts: ["Bank of America"],
+      actualHiddenAccounts: [],
+      appApiKey: "",
+      appApiSecret: "",
+    } as any);
+    const res = await app.request("/accounts?provider=actual", {
+      headers: { Authorization: authHeader },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Both Actual accounts returned — the YNAB hidden NAME does not leak.
+    expect(body).toEqual([
+      { id: "act-1", name: "Checking" },
+      { id: "act-2", name: "Bank of America" },
+    ]);
   });
 
   it("POST /import with valid body returns success", async () => {

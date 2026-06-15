@@ -14,7 +14,7 @@ describe("runStartupAccountMigration", () => {
         budgetProvider: "ynab",
         ynabAccountId: "",
         defaultAccount: "Checking",
-        hiddenAccounts: [],
+        ynabHiddenAccounts: [],
       }),
       resolveAccounts: async () => [{ id: "acc-1", name: "Checking" }],
       persist,
@@ -29,7 +29,7 @@ describe("runStartupAccountMigration", () => {
         budgetProvider: "ynab",
         ynabAccountId: "",
         defaultAccount: "Bank of America", // stale: account was renamed
-        hiddenAccounts: [],
+        ynabHiddenAccounts: [],
       }),
       resolveAccounts: async () => [{ id: "acc-1", name: "Wells Fargo Checking" }],
       persist,
@@ -44,7 +44,7 @@ describe("runStartupAccountMigration", () => {
           budgetProvider: "ynab",
           ynabAccountId: "",
           defaultAccount: "Checking",
-          hiddenAccounts: [],
+          ynabHiddenAccounts: [],
         }),
         resolveAccounts: async () => [{ id: "acc-1", name: "Checking" }],
         persist: () => {

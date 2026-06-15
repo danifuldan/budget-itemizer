@@ -49,7 +49,7 @@ test("settings: Actual Test Connection shows Connected and populates the budget 
     minimizeToTray: true,
     matchAcrossAccounts: true,
     discountMode: "distribute",
-    hiddenAccounts: [],
+    ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/setup/status", (route) => {

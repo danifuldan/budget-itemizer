@@ -34,7 +34,7 @@ test("settings: budget-load error is suppressed when a budget is already shown",
     minimizeToTray: true,
     matchAcrossAccounts: true,
     discountMode: "distribute",
-    hiddenAccounts: [],
+    ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/status", (r) => r.fulfill({

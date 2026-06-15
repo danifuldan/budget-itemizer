@@ -229,7 +229,13 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     setShowNotifications(config.watcherNotify);
     setMatchAcrossAccounts(config.matchAcrossAccounts);
     setDiscountMode(config.discountMode || "distribute");
-    setHiddenAccounts(config.hiddenAccounts || []);
+    // hiddenAccounts state tracks the ACTIVE provider's list (the visibility
+    // section only ever shows the active provider's accounts).
+    setHiddenAccounts(
+      (config.budgetProvider || "ynab") === "actual"
+        ? config.actualHiddenAccounts || []
+        : config.ynabHiddenAccounts || [],
+    );
     getAutostart().then(setStartOnLogin);
 
     // Pre-populate the budget dropdown so the user sees their saved
@@ -297,6 +303,10 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       : (config.ynabBudgetId || "");
     budgetAccountLoader.setSelectedBudgetId(restoredBudgetId);
     budgetAccountLoader.setSelectedAccount(config.ynabAccountId || "");
+    // Swap the visibility list to the new provider's so the toggle section
+    // (and the next Save) operate on ITS hidden accounts, not the prior
+    // provider's.
+    setHiddenAccounts(provider === "actual" ? (config.actualHiddenAccounts || []) : (config.ynabHiddenAccounts || []));
     await apiPost("/config", { budgetProvider: provider });
     // Backend is now on the new provider, so re-fetch ITS budgets (and,
     // if one is saved, accounts) — the mount-time prime only ran for the
@@ -345,7 +355,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       minimizeToTray,
       matchAcrossAccounts,
       discountMode,
-      hiddenAccounts,
+      // Persist the visibility list to the ACTIVE provider's field only; the
+      // other provider's field stays untouched (saveConfig merges), so a
+      // YNAB save can't wipe Actual's hidden accounts or vice versa.
+      ...(budgetProvider === "actual"
+        ? { actualHiddenAccounts: hiddenAccounts }
+        : { ynabHiddenAccounts: hiddenAccounts }),
     };
     // Only include secret fields if the user actually typed a new value
     if (ynabTest.state.apiKey) updates.ynabApiKey = ynabTest.state.apiKey;

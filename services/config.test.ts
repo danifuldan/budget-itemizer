@@ -72,6 +72,38 @@ describe("loadConfig", () => {
     expect(mockedFs.writeFileSync).toHaveBeenCalled();
   });
 
+  it("defaults both per-provider hidden lists to empty", async () => {
+    mockedFs.existsSync.mockReturnValue(false);
+    const config = await loadConfig();
+    expect(config.ynabHiddenAccounts).toEqual([]);
+    expect(config.actualHiddenAccounts).toEqual([]);
+  });
+
+  it("folds a legacy global hiddenAccounts list into ynabHiddenAccounts and drops the legacy key", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({ hiddenAccounts: ["acc-1", "acc-2"] })
+    );
+    const config = await loadConfig();
+    // Legacy data was YNAB-centric (the migration only ran for YNAB), so it
+    // lands in the YNAB list, not Actual's.
+    expect(config.ynabHiddenAccounts).toEqual(["acc-1", "acc-2"]);
+    expect(config.actualHiddenAccounts).toEqual([]);
+    // The legacy field is removed from the in-memory config and rewritten out.
+    expect((config as any).hiddenAccounts).toBeUndefined();
+    expect(mockedFs.writeFileSync).toHaveBeenCalled();
+  });
+
+  it("does not clobber an existing ynabHiddenAccounts when a legacy key is also present", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({ hiddenAccounts: ["legacy"], ynabHiddenAccounts: ["already-migrated"] })
+    );
+    const config = await loadConfig();
+    expect(config.ynabHiddenAccounts).toEqual(["already-migrated"]);
+    expect((config as any).hiddenAccounts).toBeUndefined();
+  });
+
   it("returns defaults and warns on corrupt JSON", async () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue("not valid json {{{");

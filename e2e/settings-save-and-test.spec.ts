@@ -59,7 +59,7 @@ test("settings: save settings POSTs /config with active provider's budget id", a
           minimizeToTray: true,
           matchAcrossAccounts: true,
           discountMode: "distribute",
-          hiddenAccounts: [],
+          ynabHiddenAccounts: [], actualHiddenAccounts: [],
         },
         auth: { username: "u", password: "p" },
       }),
@@ -85,7 +85,7 @@ test("settings: save settings POSTs /config with active provider's budget id", a
           minimizeToTray: true,
           matchAcrossAccounts: true,
           discountMode: "distribute",
-          hiddenAccounts: [],
+          ynabHiddenAccounts: [], actualHiddenAccounts: [],
         }),
       });
     } else {

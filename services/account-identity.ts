@@ -13,7 +13,10 @@ interface MigratableConfig {
   budgetProvider: string;
   ynabAccountId?: string;
   defaultAccount: string;
-  hiddenAccounts: string[];
+  /** YNAB's per-provider hidden list. Reconciliation resolves names→ids
+   *  against YNAB accounts; Actual's list lives in a separate field and is
+   *  never read or written here (a YNAB-only resolve would prune its ids). */
+  ynabHiddenAccounts: string[];
 }
 
 const sameSet = (a: string[], b: string[]): boolean => {
@@ -25,11 +28,11 @@ const sameSet = (a: string[], b: string[]): boolean => {
 export async function migrateAccountIdentity(
   cfg: MigratableConfig,
   resolveAccounts: () => Promise<AccountRef[]>,
-  persist: (updates: { ynabAccountId?: string; hiddenAccounts?: string[] }) => Promise<void> | void,
-): Promise<{ ynabAccountId: string; hiddenAccounts: string[] }> {
+  persist: (updates: { ynabAccountId?: string; ynabHiddenAccounts?: string[] }) => Promise<void> | void,
+): Promise<{ ynabAccountId: string; ynabHiddenAccounts: string[] }> {
   const currentId = cfg.ynabAccountId ?? "";
-  const currentHidden = cfg.hiddenAccounts ?? [];
-  const unchanged = { ynabAccountId: currentId, hiddenAccounts: currentHidden };
+  const currentHidden = cfg.ynabHiddenAccounts ?? [];
+  const unchanged = { ynabAccountId: currentId, ynabHiddenAccounts: currentHidden };
 
   if (cfg.budgetProvider !== "ynab") return unchanged;
   // Steady state: id resolved and no name-keyed hidden entries to fix.
@@ -65,9 +68,9 @@ export async function migrateAccountIdentity(
     ),
   );
 
-  const updates: { ynabAccountId?: string; hiddenAccounts?: string[] } = {};
+  const updates: { ynabAccountId?: string; ynabHiddenAccounts?: string[] } = {};
   if (nextId !== currentId) updates.ynabAccountId = nextId;
-  if (!sameSet(nextHidden, currentHidden)) updates.hiddenAccounts = nextHidden;
+  if (!sameSet(nextHidden, currentHidden)) updates.ynabHiddenAccounts = nextHidden;
 
   if (Object.keys(updates).length > 0) {
     try {
@@ -77,13 +80,13 @@ export async function migrateAccountIdentity(
     }
   }
 
-  return { ynabAccountId: nextId, hiddenAccounts: nextHidden };
+  return { ynabAccountId: nextId, ynabHiddenAccounts: nextHidden };
 }
 
 export interface StartupMigrationDeps {
   getConfig: () => MigratableConfig;
   resolveAccounts: () => Promise<AccountRef[]>;
-  persist: (u: { ynabAccountId?: string; hiddenAccounts?: string[] }) => Promise<void> | void;
+  persist: (u: { ynabAccountId?: string; ynabHiddenAccounts?: string[] }) => Promise<void> | void;
 }
 
 // index.ts calls this non-blocking AFTER the HTTP server binds, so it

@@ -31,7 +31,7 @@ test("settings: a failed budgets fetch surfaces an error, recovers on Test Conne
     minimizeToTray: true,
     matchAcrossAccounts: true,
     discountMode: "distribute",
-    hiddenAccounts: [],
+    ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/status", (r) => r.fulfill({

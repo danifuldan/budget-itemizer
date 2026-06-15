@@ -12,7 +12,7 @@ const ynab = (over: Partial<Parameters<typeof migrateAccountIdentity>[0]> = {}) 
   budgetProvider: "ynab",
   ynabAccountId: "",
   defaultAccount: "",
-  hiddenAccounts: [] as string[],
+  ynabHiddenAccounts: [] as string[],
   ...over,
 });
 
@@ -45,20 +45,20 @@ describe("migrateAccountIdentity", () => {
     const persist = vi.fn();
     const resolve = vi.fn(async () => [{ id: "acc1", name: "Wells Fargo Checking" }]);
     await migrateAccountIdentity(
-      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", hiddenAccounts: ["acc1"] }),
+      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["acc1"] }),
       resolve,
       persist,
     );
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it("hiddenAccounts: names → ids, unresolvable dropped, existing ids kept", async () => {
+  it("ynabHiddenAccounts: names → ids, unresolvable dropped, existing ids kept", async () => {
     const persist = vi.fn();
     const out = await migrateAccountIdentity(
       ynab({
         ynabAccountId: "acc1",
         defaultAccount: "Wells Fargo Checking",
-        hiddenAccounts: ["Old Closed Acct", "Savings", "acc1"],
+        ynabHiddenAccounts: ["Old Closed Acct", "Savings", "acc1"],
       }),
       async () => [
         { id: "acc1", name: "Wells Fargo Checking" },
@@ -66,16 +66,35 @@ describe("migrateAccountIdentity", () => {
       ],
       persist,
     );
-    expect(out.hiddenAccounts.sort()).toEqual(["acc1", "acc9"]);
+    expect(out.ynabHiddenAccounts.sort()).toEqual(["acc1", "acc9"]);
     expect(persist).toHaveBeenCalledWith(
-      expect.objectContaining({ hiddenAccounts: expect.arrayContaining(["acc1", "acc9"]) }),
+      expect.objectContaining({ ynabHiddenAccounts: expect.arrayContaining(["acc1", "acc9"]) }),
+    );
+  });
+
+  // Regression (Bug B): the YNAB reconciliation must operate ONLY on the YNAB
+  // hidden list. It persists `ynabHiddenAccounts`, never the legacy global
+  // `hiddenAccounts` key — so Actual's separate list can't be pruned by a
+  // YNAB-only resolve.
+  it("persists ynabHiddenAccounts, never the legacy global hiddenAccounts key", async () => {
+    const persist = vi.fn();
+    await migrateAccountIdentity(
+      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["Savings"] }),
+      async () => [{ id: "acc1", name: "Wells Fargo Checking" }, { id: "acc9", name: "Savings" }],
+      persist,
+    );
+    expect(persist).toHaveBeenCalledWith(
+      expect.objectContaining({ ynabHiddenAccounts: ["acc9"] }),
+    );
+    expect(persist).not.toHaveBeenCalledWith(
+      expect.objectContaining({ hiddenAccounts: expect.anything() }),
     );
   });
 
   it("non-ynab provider → no-op even with stale data", async () => {
     const persist = vi.fn();
     await migrateAccountIdentity(
-      { budgetProvider: "actual", ynabAccountId: "", defaultAccount: "Stale", hiddenAccounts: ["x"] },
+      { budgetProvider: "actual", ynabAccountId: "", defaultAccount: "Stale", ynabHiddenAccounts: ["x"] },
       async () => [{ id: "a", name: "b" }],
       persist,
     );

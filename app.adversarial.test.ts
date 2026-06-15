@@ -52,7 +52,9 @@ vi.mock("./services/config", () => ({
     watcherFocusApp: true,
     minimizeToTray: true,
     matchAcrossAccounts: true,
-    hiddenAccounts: [],
+    budgetProvider: "ynab",
+    ynabHiddenAccounts: [],
+    actualHiddenAccounts: [],
   })),
   saveConfig: vi.fn((updates: any) => ({ ...updates })),
   isSetupComplete: vi.fn(() => true),
@@ -495,23 +497,23 @@ describe("POST /config — schema boundary fuzz", () => {
     expect(res.status).toBe(400);
   });
 
-  // hiddenAccounts at exactly 256 entries — boundary
-  it("hiddenAccounts at exactly 256 entries is accepted", async () => {
+  // ynabHiddenAccounts at exactly 256 entries — boundary
+  it("ynabHiddenAccounts at exactly 256 entries is accepted", async () => {
     const arr = Array.from({ length: 256 }, (_, i) => `acct${i}`);
     const res = await app.request("/config", {
       method: "POST",
       headers: { Authorization: goodAuth, "Content-Type": "application/json" },
-      body: JSON.stringify({ hiddenAccounts: arr }),
+      body: JSON.stringify({ ynabHiddenAccounts: arr }),
     });
     expect(res.status).toBe(200);
   });
 
-  it("hiddenAccounts at 257 entries is rejected", async () => {
+  it("ynabHiddenAccounts at 257 entries is rejected", async () => {
     const arr = Array.from({ length: 257 }, (_, i) => `acct${i}`);
     const res = await app.request("/config", {
       method: "POST",
       headers: { Authorization: goodAuth, "Content-Type": "application/json" },
-      body: JSON.stringify({ hiddenAccounts: arr }),
+      body: JSON.stringify({ ynabHiddenAccounts: arr }),
     });
     expect(res.status).toBe(400);
   });

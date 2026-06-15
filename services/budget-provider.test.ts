@@ -156,7 +156,8 @@ describe("resetBudgetProviderIfAffected", () => {
     // Non-credential fields (incl. the shared account fields) must NOT reset.
     for (const f of [
       "inboxPath", "processedPath", "watcherEnabled", "discountMode",
-      "hiddenAccounts", "defaultAccount", "ynabAccountId", "minimizeToTray",
+      "ynabHiddenAccounts", "actualHiddenAccounts", "defaultAccount",
+      "ynabAccountId", "minimizeToTray",
     ]) {
       expect(isProviderAffectingUpdate({ [f]: "x" })).toBe(false);
     }

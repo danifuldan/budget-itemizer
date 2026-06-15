@@ -32,7 +32,7 @@ test("settings: default account survives a provider round-trip", async ({ page }
     minimizeToTray: true,
     matchAcrossAccounts: true,
     discountMode: "distribute",
-    hiddenAccounts: [],
+    ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/status", (r) => r.fulfill({

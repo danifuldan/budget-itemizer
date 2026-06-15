@@ -35,11 +35,17 @@ meta.get("/accounts", auth, async (c) => {
     const all = await getAllAccounts(provider);
     const showAll = c.req.query("all") === "true";
     if (showAll) return c.json(all, 200);
-    const hidden = getConfig().hiddenAccounts;
-    // Tolerate un-migrated config: on the first post-upgrade launch
-    // hiddenAccounts still holds NAMES until the async startup migration
-    // reconciles them to ids. Match on either so previously-hidden
-    // accounts don't reappear in that window.
+    // Filter by the hidden list for the EFFECTIVE provider (the explicit
+    // query, else config-active). The list is per-provider, so one provider's
+    // hidden entries can't affect the other — which is what fixes the
+    // cross-provider leak. Within a provider we still match by id OR name:
+    // YNAB's list can briefly hold un-migrated NAMES on first post-upgrade
+    // launch (the async startup migration reconciles them to ids), and the
+    // by-name match keeps those hidden until it lands. Names only ever match
+    // within their own provider's accounts now, so no cross-hiding.
+    const cfg = getConfig();
+    const effectiveProvider = provider ?? cfg.budgetProvider;
+    const hidden = effectiveProvider === "actual" ? cfg.actualHiddenAccounts : cfg.ynabHiddenAccounts;
     const filtered = hidden.length > 0
       ? all.filter((a) => !hidden.includes(a.id) && !hidden.includes(a.name))
       : all;

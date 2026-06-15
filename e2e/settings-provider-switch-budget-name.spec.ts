@@ -36,7 +36,7 @@ test("settings: switching provider shows the budget name, not the raw id", async
     minimizeToTray: true,
     matchAcrossAccounts: true,
     discountMode: "distribute",
-    hiddenAccounts: [],
+    ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/status", (route) => {

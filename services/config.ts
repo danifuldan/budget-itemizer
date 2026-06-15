@@ -34,7 +34,13 @@ export interface AppConfig {
   watcherFocusApp: boolean;
   minimizeToTray: boolean;
   matchAcrossAccounts: boolean;
-  hiddenAccounts: string[];
+  /** Per-provider account-visibility lists (stable account ids). Kept
+   *  separate so a YNAB-only reconciliation can't prune Actual ids and a
+   *  same-named account on the other provider can't be cross-hidden. The
+   *  legacy global `hiddenAccounts` is folded into `ynabHiddenAccounts` on
+   *  load (it was YNAB-centric). */
+  ynabHiddenAccounts: string[];
+  actualHiddenAccounts: string[];
   discountMode: "distribute" | "credit";
   budgetProvider: "ynab" | "actual";
   actualServerUrl: string;
@@ -64,7 +70,8 @@ const defaults: AppConfig = {
   watcherFocusApp: false,
   minimizeToTray: true,
   matchAcrossAccounts: true,
-  hiddenAccounts: [],
+  ynabHiddenAccounts: [],
+  actualHiddenAccounts: [],
   discountMode: "distribute",
   budgetProvider: "ynab",
   actualServerUrl: "",
@@ -81,6 +88,22 @@ export const wasConfigReset = (): boolean => _configWasReset;
 
 const ensureDir = () => ensureRestrictedDir(CONFIG_DIR);
 const writeConfigFile = (data: string): void => writeRestrictedFile(CONFIG_FILE, data);
+
+/** Fold the legacy global `hiddenAccounts` list into the per-provider
+ *  `ynabHiddenAccounts` (it was YNAB-centric — the reconciliation only ever
+ *  ran for YNAB) and drop the legacy key. Idempotent: only assigns when the
+ *  new field isn't already present, so a re-read after migration is a no-op.
+ *  Mutates `fileConfig`; returns true if the legacy key was present (so the
+ *  caller can rewrite the file to drop it). */
+function foldLegacyHiddenAccounts(fileConfig: Partial<AppConfig> & { hiddenAccounts?: unknown }): boolean {
+  if (!("hiddenAccounts" in fileConfig)) return false;
+  const legacy = fileConfig.hiddenAccounts;
+  if (Array.isArray(legacy) && legacy.length > 0 && fileConfig.ynabHiddenAccounts === undefined) {
+    fileConfig.ynabHiddenAccounts = legacy as string[];
+  }
+  delete fileConfig.hiddenAccounts;
+  return true;
+}
 
 /** Strip secret fields out of an object. Used before writing config.json
  *  so secrets never touch disk in plain form. */
@@ -107,6 +130,8 @@ function loadFileConfigSync(): AppConfig {
       _configWasReset = true;
     }
   }
+
+  foldLegacyHiddenAccounts(fileConfig);
 
   const merged: AppConfig = {
     ...defaults,
@@ -139,6 +164,13 @@ export const loadConfig = async (): Promise<AppConfig> => {
   }
 
   let needsRewriteAfterMigration = false;
+
+  // Fold the legacy global hidden-accounts list into the per-provider field
+  // and drop it from disk on the next rewrite.
+  if (foldLegacyHiddenAccounts(fileConfig)) {
+    needsRewriteAfterMigration = true;
+  }
+
   for (const key of SECRET_FIELDS) {
     const fileValue = (fileConfig as any)[key];
     if (typeof fileValue === "string" && fileValue.length > 0) {

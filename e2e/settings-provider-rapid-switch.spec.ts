@@ -21,7 +21,7 @@ test("settings: rapid provider toggling settles the saved account", async ({ pag
     inboxPath: "/tmp/in", processedPath: "/tmp/out",
     watcherEnabled: true, watcherAutoImport: false, watcherFocusApp: true,
     watcherNotify: true, minimizeToTray: true, matchAcrossAccounts: true,
-    discountMode: "distribute", hiddenAccounts: [],
+    discountMode: "distribute", ynabHiddenAccounts: [], actualHiddenAccounts: [],
   };
 
   await page.route("**/status", (r) => r.fulfill({ status: 200, contentType: "application/json",
