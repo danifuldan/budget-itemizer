@@ -31,7 +31,7 @@ vi.mock("./services/config", () => ({
     ynabApiKey: "test-key",
     ynabBudgetId: "test-budget",
     ynabCategoryGroups: [],
-    defaultAccount: "Checking",
+    ynabDefaultAccount: "Checking",
     inboxPath: "/inbox",
     processedPath: "/processed",
     appPort: 3000,
@@ -541,7 +541,7 @@ describe("Hono app integration", () => {
     const res = await app.request("/config", {
       method: "POST",
       headers: { Authorization: authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({ defaultAccount: "Checking" }),
+      body: JSON.stringify({ ynabDefaultAccount: "Checking" }),
     });
 
     expect(res.status).toBe(200);
@@ -558,7 +558,7 @@ describe("Hono app integration", () => {
     const res = await app.request("/config", {
       method: "POST",
       headers: { Authorization: authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({ defaultAccount: "Checking" }),
+      body: JSON.stringify({ ynabDefaultAccount: "Checking" }),
     });
 
     expect(res.status).toBe(200);

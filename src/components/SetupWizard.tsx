@@ -4,7 +4,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
-import { budgetIdFieldFor, budgetIdUpdateFor } from "../lib/budgetProvider";
+import { budgetIdFieldFor, budgetIdUpdateFor, accountUpdateFor } from "../lib/budgetProvider";
 import { apiFetch } from "../api/client";
 import TitlebarRegion from "./TitlebarRegion";
 import ConfirmDialog from "./ConfirmDialog";
@@ -197,10 +197,10 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           // ynabBudgetId, so an Actual sync id landed in the wrong field
           // and isSetupComplete() never saw a budget → setup looped.
           ...budgetIdUpdateFor(budgetProvider, budgetAccountLoader.state.selectedBudgetId),
-          // Identity is the id; name persisted alongside (backend
-          // isSetupComplete is name-keyed, readable config).
-          ynabAccountId: acctId,
-          defaultAccount: acctName,
+          // Identity is the id; name persisted alongside (readable config,
+          // and isSetupComplete accepts id OR name). Per-provider account
+          // fields so setup for one provider doesn't touch the other's.
+          ...accountUpdateFor(budgetProvider, acctId, acctName),
         });
         break;
       }

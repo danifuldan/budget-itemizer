@@ -40,7 +40,7 @@ vi.mock("./services/config", () => ({
     ynabApiKey: "test-key",
     ynabBudgetId: "test-budget",
     ynabCategoryGroups: [],
-    defaultAccount: "Checking",
+    ynabDefaultAccount: "Checking",
     inboxPath: "/inbox",
     processedPath: "/processed",
     appPort: 3000,

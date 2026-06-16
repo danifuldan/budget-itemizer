@@ -12,7 +12,7 @@ export type { AccountRef };
 interface MigratableConfig {
   budgetProvider: string;
   ynabAccountId?: string;
-  defaultAccount: string;
+  ynabDefaultAccount: string;
   /** YNAB's per-provider hidden list. Reconciliation resolves names→ids
    *  against YNAB accounts; Actual's list lives in a separate field and is
    *  never read or written here (a YNAB-only resolve would prune its ids). */
@@ -54,8 +54,8 @@ export async function migrateAccountIdentity(
   // stored name that no longer exists (rename) leaves the id empty —
   // do NOT guess; the picker will re-select.
   let nextId = currentId;
-  if (!currentId && cfg.defaultAccount) {
-    nextId = byName.get(cfg.defaultAccount) ?? "";
+  if (!currentId && cfg.ynabDefaultAccount) {
+    nextId = byName.get(cfg.ynabDefaultAccount) ?? "";
   }
 
   // Hidden accounts: keep entries that are already ids, map names → ids,

@@ -543,9 +543,14 @@ export default function App() {
   // first account) and the "only fill if empty / non-empty list" guards,
   // so this effect just hands it the inputs. useRetryableFetch returns a
   // fresh array each poll — re-dispatches are no-ops by reducer design.
+  // Import target is per-provider — seed the main-view account from the
+  // ACTIVE provider's saved id, not the YNAB field unconditionally.
+  const activeAccountId = appConfig.budgetProvider === "actual"
+    ? appConfig.actualAccountId
+    : appConfig.ynabAccountId;
   useEffect(() => {
-    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccountId: appConfig.ynabAccountId });
-  }, [accounts, appConfig.ynabAccountId]);
+    dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccountId: activeAccountId });
+  }, [accounts, activeAccountId]);
 
   const handleFile = (file: File) => {
     // If the LLM is still warming up, don't enter the review flow — the

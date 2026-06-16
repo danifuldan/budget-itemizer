@@ -30,3 +30,23 @@ export function budgetIdUpdateFor(
     ? { actualSyncId: budgetId }
     : { ynabBudgetId: budgetId };
 }
+
+/**
+ * Config patch that persists the selected import-target account (id + display
+ * name) under the ACTIVE provider's fields, leaving the other provider's
+ * fields untouched (by omission). The import target is per-provider, so
+ * writing only the active provider's fields means a save can't clobber the
+ * other provider's account — the same routing discipline as
+ * `budgetIdUpdateFor`, applied to the account.
+ */
+export function accountUpdateFor(
+  provider: BudgetProviderId,
+  accountId: string,
+  accountName: string,
+):
+  | { ynabAccountId: string; ynabDefaultAccount: string }
+  | { actualAccountId: string; actualDefaultAccount: string } {
+  return provider === "actual"
+    ? { actualAccountId: accountId, actualDefaultAccount: accountName }
+    : { ynabAccountId: accountId, ynabDefaultAccount: accountName };
+}

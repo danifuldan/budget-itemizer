@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { budgetIdFieldFor, budgetIdUpdateFor } from "./budgetProvider";
+import { budgetIdFieldFor, budgetIdUpdateFor, accountUpdateFor } from "./budgetProvider";
 
 // The disagreement that broke setup (commit 3175490): an Actual budget
 // id MUST land in actualSyncId, never in ynabBudgetId. These pin both
@@ -25,5 +25,23 @@ describe("budgetIdUpdateFor", () => {
     const patch = budgetIdUpdateFor("ynab", "budget-123");
     expect(patch).toEqual({ ynabBudgetId: "budget-123" });
     expect("actualSyncId" in patch).toBe(false);
+  });
+});
+
+// The import target is per-provider. A save must write ONLY the active
+// provider's account fields — the absence of the other provider's fields is
+// what guarantees saving one provider can't clobber the other's account.
+describe("accountUpdateFor", () => {
+  it("writes only the Actual account fields, leaving the YNAB ones absent", () => {
+    const patch = accountUpdateFor("actual", "act-1", "Spending");
+    expect(patch).toEqual({ actualAccountId: "act-1", actualDefaultAccount: "Spending" });
+    expect("ynabAccountId" in patch).toBe(false);
+    expect("ynabDefaultAccount" in patch).toBe(false);
+  });
+  it("writes only the YNAB account fields, leaving the Actual ones absent", () => {
+    const patch = accountUpdateFor("ynab", "acc-1", "Checking");
+    expect(patch).toEqual({ ynabAccountId: "acc-1", ynabDefaultAccount: "Checking" });
+    expect("actualAccountId" in patch).toBe(false);
+    expect("actualDefaultAccount" in patch).toBe(false);
   });
 });

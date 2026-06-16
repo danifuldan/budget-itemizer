@@ -43,11 +43,11 @@ describe("loadConfig", () => {
   it("merges partial config file with defaults (non-secret fields)", async () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(
-      JSON.stringify({ appPort: 4000, defaultAccount: "Checking" })
+      JSON.stringify({ appPort: 4000, ynabDefaultAccount: "Checking" })
     );
     const config = await loadConfig();
     expect(config.appPort).toBe(4000);
-    expect(config.defaultAccount).toBe("Checking");
+    expect(config.ynabDefaultAccount).toBe("Checking");
     expect(config.embeddedModel).toBe("llama3.1-8b");
   });
 
@@ -115,6 +115,38 @@ describe("loadConfig", () => {
   });
 });
 
+describe("legacy account-field migration", () => {
+  it("folds a legacy defaultAccount into ynabDefaultAccount when provider is unset/ynab", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({ ynabAccountId: "acc-1", defaultAccount: "Checking" })
+    );
+    const config = await loadConfig();
+    expect(config.ynabDefaultAccount).toBe("Checking");
+    expect(config.ynabAccountId).toBe("acc-1"); // YNAB id stays put
+    expect(config.actualDefaultAccount).toBe("");
+    expect(config.actualAccountId).toBe("");
+    expect((config as any).defaultAccount).toBeUndefined();
+    expect(mockedFs.writeFileSync).toHaveBeenCalled();
+  });
+
+  it("relocates a misfiled account into the Actual fields when budgetProvider was actual", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    // When Actual was active, the legacy shared fields held ACTUAL data
+    // misfiled under the YNAB-named ynabAccountId + the shared defaultAccount.
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({ budgetProvider: "actual", ynabAccountId: "actual-acc", defaultAccount: "Spending" })
+    );
+    const config = await loadConfig();
+    expect(config.actualAccountId).toBe("actual-acc");
+    expect(config.actualDefaultAccount).toBe("Spending");
+    // YNAB slot cleared — we don't know YNAB's id; the picker re-selects.
+    expect(config.ynabAccountId).toBe("");
+    expect(config.ynabDefaultAccount).toBe("");
+    expect((config as any).defaultAccount).toBeUndefined();
+  });
+});
+
 describe("saveConfig", () => {
   it("merges partial updates with current config", async () => {
     mockedFs.existsSync.mockReturnValue(false);
@@ -149,7 +181,7 @@ describe("isSetupComplete", () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(
       JSON.stringify({
-        // missing ynabBudgetId, defaultAccount
+        // missing ynabBudgetId, ynab account
         inboxPath: "/inbox",
         processedPath: "/processed",
       })
@@ -158,5 +190,46 @@ describe("isSetupComplete", () => {
     vi.mocked(getSecret).mockResolvedValueOnce("ynab-key");
     await loadConfig();
     expect(isSetupComplete()).toBe(false);
+  });
+
+  // 2A: the gate checks the ACTIVE provider's own account, so a name left
+  // over from the other provider can't make setup look complete.
+  it("Actual setup is NOT complete just because a YNAB account name lingers", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({
+        budgetProvider: "actual",
+        actualServerUrl: "https://localhost:5006",
+        actualSyncId: "sync-1",
+        ynabDefaultAccount: "Checking", // leftover from YNAB — must not satisfy Actual
+        // no actualAccountId / actualDefaultAccount
+        inboxPath: "/inbox",
+        processedPath: "/processed",
+      })
+    );
+    const { getSecret } = await import("./keychain");
+    // actualPassword present (secret), so only the account is missing.
+    vi.mocked(getSecret).mockResolvedValue("secret");
+    await loadConfig();
+    expect(isSetupComplete()).toBe(false);
+  });
+
+  // The id can be empty on first post-upgrade launch (async name→id migration
+  // pending); the NAME alone keeps the gate satisfied so the wizard doesn't
+  // spuriously relaunch.
+  it("YNAB setup is complete with only ynabDefaultAccount (id not yet resolved)", async () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(
+      JSON.stringify({
+        ynabBudgetId: "budget",
+        ynabDefaultAccount: "Checking", // name only, ynabAccountId still ""
+        inboxPath: "/inbox",
+        processedPath: "/processed",
+      })
+    );
+    const { getSecret } = await import("./keychain");
+    vi.mocked(getSecret).mockResolvedValueOnce("ynab-key");
+    await loadConfig();
+    expect(isSetupComplete()).toBe(true);
   });
 });

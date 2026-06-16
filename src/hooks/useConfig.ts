@@ -13,7 +13,9 @@ export interface ConfigData {
   actualPasswordLength?: number;
   actualSyncId: string;
   ynabAccountId: string;
-  defaultAccount: string;
+  ynabDefaultAccount: string;
+  actualAccountId: string;
+  actualDefaultAccount: string;
   inboxPath: string;
   processedPath: string;
   deleteAfterImport: boolean;
@@ -37,7 +39,9 @@ const defaultConfig: ConfigData = {
   actualPassword: "",
   actualSyncId: "",
   ynabAccountId: "",
-  defaultAccount: "",
+  ynabDefaultAccount: "",
+  actualAccountId: "",
+  actualDefaultAccount: "",
   inboxPath: "",
   processedPath: "",
   deleteAfterImport: false,

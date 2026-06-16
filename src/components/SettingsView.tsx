@@ -8,7 +8,7 @@ import { useModelDownload } from "../hooks/useModelDownload";
 import { useYnabTest } from "../hooks/useYnabTest";
 import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
-import { budgetIdFieldFor } from "../lib/budgetProvider";
+import { budgetIdFieldFor, accountUpdateFor } from "../lib/budgetProvider";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
 import { apiFetch, apiPost } from "../api/client";
 import Toggle from "./Toggle";
@@ -142,11 +142,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
   // a YNAB id leaked into actualSyncId on save.
   const savedProvider = config.budgetProvider || "ynab";
   const savedBudgetId = savedProvider === "actual" ? config.actualSyncId : config.ynabBudgetId;
+  const savedAccountId = savedProvider === "actual" ? config.actualAccountId : config.ynabAccountId;
   const budgetAccountLoader = useBudgetAccountLoader({
     budgetIdField: budgetIdFieldFor(budgetProvider),
     loadAllAccounts: true,
     initialSelectedBudgetId: savedBudgetId || "",
-    initialSelectedAccount: config.ynabAccountId || "",
+    initialSelectedAccount: savedAccountId || "",
   });
 
   // Resync the Default Account + Account Visibility lists when the user
@@ -301,8 +302,13 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     const restoredBudgetId = provider === "actual"
       ? (config.actualSyncId || "")
       : (config.ynabBudgetId || "");
+    // Restore the new provider's OWN saved account id, not the prior
+    // provider's (the import target is per-provider now).
+    const restoredAccountId = provider === "actual"
+      ? (config.actualAccountId || "")
+      : (config.ynabAccountId || "");
     budgetAccountLoader.setSelectedBudgetId(restoredBudgetId);
-    budgetAccountLoader.setSelectedAccount(config.ynabAccountId || "");
+    budgetAccountLoader.setSelectedAccount(restoredAccountId);
     // Swap the visibility list to the new provider's so the toggle section
     // (and the next Save) operate on ITS hidden accounts, not the prior
     // provider's.
@@ -318,7 +324,7 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // target), and the provider makes /accounts read THIS provider regardless
     // of the backend's global flag — together they close the rapid-switch
     // read race for both the selection and the account list.
-    if (restoredBudgetId) budgetAccountLoader.refreshAccounts(config.ynabAccountId || "", provider);
+    if (restoredBudgetId) budgetAccountLoader.refreshAccounts(restoredAccountId, provider);
   };
 
   const handleSave = async () => {
@@ -337,14 +343,18 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
       actualSyncId: budgetProvider === "actual"
         ? budgetAccountLoader.state.selectedBudgetId
         : config.actualSyncId,
-      // Identity is the id; the display name is persisted alongside so
-      // backend isSetupComplete() (name-keyed, so a rename doesn't
-      // relaunch the wizard) and config.json stay human-readable.
-      ynabAccountId: selectedAccountId,
-      defaultAccount:
+      // Identity is the id; the display name is persisted alongside (readable
+      // config; isSetupComplete accepts id OR name). Per-provider via the
+      // shared helper — writes ONLY the active provider's account fields, so a
+      // save can't clobber the other provider's import target (non-active
+      // fields are omitted and saveConfig merges).
+      ...accountUpdateFor(
+        budgetProvider,
+        selectedAccountId,
         (allAccounts.find((a) => a.id === selectedAccountId)
           ?? accounts.find((a) => a.id === selectedAccountId))?.name
-        ?? config.defaultAccount,
+          ?? (budgetProvider === "actual" ? config.actualDefaultAccount : config.ynabDefaultAccount),
+      ),
       inboxPath,
       processedPath,
       deleteAfterImport,

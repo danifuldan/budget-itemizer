@@ -11,7 +11,7 @@ import type { AccountRef } from "./account-identity";
 const ynab = (over: Partial<Parameters<typeof migrateAccountIdentity>[0]> = {}) => ({
   budgetProvider: "ynab",
   ynabAccountId: "",
-  defaultAccount: "",
+  ynabDefaultAccount: "",
   ynabHiddenAccounts: [] as string[],
   ...over,
 });
@@ -20,7 +20,7 @@ describe("migrateAccountIdentity", () => {
   it("renamed account: stored name absent in YNAB → id stays empty, no throw, no guess", async () => {
     const persist = vi.fn();
     const out = await migrateAccountIdentity(
-      ynab({ defaultAccount: "Bank of America" }),
+      ynab({ ynabDefaultAccount: "Bank of America" }),
       async (): Promise<AccountRef[]> => [{ id: "acc1", name: "Wells Fargo Checking" }],
       persist,
     );
@@ -33,7 +33,7 @@ describe("migrateAccountIdentity", () => {
   it("resolvable name → id is set and persisted", async () => {
     const persist = vi.fn();
     const out = await migrateAccountIdentity(
-      ynab({ defaultAccount: "Wells Fargo Checking" }),
+      ynab({ ynabDefaultAccount: "Wells Fargo Checking" }),
       async () => [{ id: "acc1", name: "Wells Fargo Checking" }],
       persist,
     );
@@ -45,7 +45,7 @@ describe("migrateAccountIdentity", () => {
     const persist = vi.fn();
     const resolve = vi.fn(async () => [{ id: "acc1", name: "Wells Fargo Checking" }]);
     await migrateAccountIdentity(
-      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["acc1"] }),
+      ynab({ ynabAccountId: "acc1", ynabDefaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["acc1"] }),
       resolve,
       persist,
     );
@@ -57,7 +57,7 @@ describe("migrateAccountIdentity", () => {
     const out = await migrateAccountIdentity(
       ynab({
         ynabAccountId: "acc1",
-        defaultAccount: "Wells Fargo Checking",
+        ynabDefaultAccount: "Wells Fargo Checking",
         ynabHiddenAccounts: ["Old Closed Acct", "Savings", "acc1"],
       }),
       async () => [
@@ -79,7 +79,7 @@ describe("migrateAccountIdentity", () => {
   it("persists ynabHiddenAccounts, never the legacy global hiddenAccounts key", async () => {
     const persist = vi.fn();
     await migrateAccountIdentity(
-      ynab({ ynabAccountId: "acc1", defaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["Savings"] }),
+      ynab({ ynabAccountId: "acc1", ynabDefaultAccount: "Wells Fargo Checking", ynabHiddenAccounts: ["Savings"] }),
       async () => [{ id: "acc1", name: "Wells Fargo Checking" }, { id: "acc9", name: "Savings" }],
       persist,
     );
@@ -94,7 +94,7 @@ describe("migrateAccountIdentity", () => {
   it("non-ynab provider → no-op even with stale data", async () => {
     const persist = vi.fn();
     await migrateAccountIdentity(
-      { budgetProvider: "actual", ynabAccountId: "", defaultAccount: "Stale", ynabHiddenAccounts: ["x"] },
+      { budgetProvider: "actual", ynabAccountId: "", ynabDefaultAccount: "Stale", ynabHiddenAccounts: ["x"] },
       async () => [{ id: "a", name: "b" }],
       persist,
     );
@@ -105,7 +105,7 @@ describe("migrateAccountIdentity", () => {
     const persist = vi.fn();
     await expect(
       migrateAccountIdentity(
-        ynab({ defaultAccount: "Bank of America" }),
+        ynab({ ynabDefaultAccount: "Bank of America" }),
         async () => {
           throw new Error("YNAB unreachable");
         },

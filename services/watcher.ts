@@ -413,7 +413,11 @@ const ensureDirs = (inbox: string, processed: string) => {
 
 export const autoImportParsed = async (entry: PendingFile) => {
   const config = getConfig();
-  const account = config.ynabAccountId;
+  // Import target is per-provider — use the ACTIVE provider's account id, not
+  // a stale id left in the other provider's field after a switch.
+  const account = config.budgetProvider === "actual"
+    ? config.actualAccountId
+    : config.ynabAccountId;
   if (!account) {
     console.error("No account configured, skipping auto-import");
     return;

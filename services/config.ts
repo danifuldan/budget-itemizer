@@ -18,10 +18,16 @@ export interface AppConfig {
   ynabApiKey: string;
   ynabBudgetId: string;
   ynabCategoryGroups: string[];
-  /** Stable YNAB account id (identity). `defaultAccount` is the display
-   *  name only — a YNAB rename changes the name, never the id. */
+  /** Per-provider import-target account. Stable account *id* (identity)
+   *  plus a display *name* (a rename changes the name, never the id), kept
+   *  separate per provider so configuring/saving one provider can't
+   *  overwrite the other's import target. The legacy shared `ynabAccountId`
+   *  + `defaultAccount` are folded into the field set for the last-active
+   *  provider on load. */
   ynabAccountId: string;
-  defaultAccount: string;
+  ynabDefaultAccount: string;
+  actualAccountId: string;
+  actualDefaultAccount: string;
   inboxPath: string;
   processedPath: string;
   deleteAfterImport: boolean;
@@ -57,7 +63,9 @@ const defaults: AppConfig = {
   ynabBudgetId: "",
   ynabCategoryGroups: [],
   ynabAccountId: "",
-  defaultAccount: "",
+  ynabDefaultAccount: "",
+  actualAccountId: "",
+  actualDefaultAccount: "",
   inboxPath: path.join(os.homedir(), "Receipts", "inbox"),
   processedPath: path.join(os.homedir(), "Receipts", "processed"),
   deleteAfterImport: false,
@@ -105,6 +113,36 @@ function foldLegacyHiddenAccounts(fileConfig: Partial<AppConfig> & { hiddenAccou
   return true;
 }
 
+/** Fold the legacy shared account-target fields (`defaultAccount`, and a
+ *  misfiled `ynabAccountId` when Actual was the active provider) into the
+ *  per-provider fields. The legacy fields held whatever provider was
+ *  last active, so `budgetProvider` decides where they land. Idempotent:
+ *  only assigns when the target field is unset. Mutates `fileConfig`;
+ *  returns true if a legacy `defaultAccount` key was present (so the caller
+ *  rewrites the file to drop it). */
+function foldLegacyAccountFields(
+  fileConfig: Partial<AppConfig> & { defaultAccount?: unknown },
+): boolean {
+  const wasActual = fileConfig.budgetProvider === "actual";
+
+  // `ynabAccountId` keeps its name for YNAB, but when Actual was active the
+  // stored id is really an Actual account id — relocate it and clear the
+  // YNAB slot (we don't know YNAB's id; the picker re-selects).
+  if (wasActual && fileConfig.ynabAccountId && fileConfig.actualAccountId === undefined) {
+    fileConfig.actualAccountId = fileConfig.ynabAccountId;
+    fileConfig.ynabAccountId = "";
+  }
+
+  if (!("defaultAccount" in fileConfig)) return false;
+  const name = fileConfig.defaultAccount;
+  const targetKey = wasActual ? "actualDefaultAccount" : "ynabDefaultAccount";
+  if (typeof name === "string" && name.length > 0 && fileConfig[targetKey] === undefined) {
+    fileConfig[targetKey] = name;
+  }
+  delete fileConfig.defaultAccount;
+  return true;
+}
+
 /** Strip secret fields out of an object. Used before writing config.json
  *  so secrets never touch disk in plain form. */
 function stripSecrets<T extends Partial<AppConfig>>(obj: T): T {
@@ -132,6 +170,7 @@ function loadFileConfigSync(): AppConfig {
   }
 
   foldLegacyHiddenAccounts(fileConfig);
+  foldLegacyAccountFields(fileConfig);
 
   const merged: AppConfig = {
     ...defaults,
@@ -165,9 +204,13 @@ export const loadConfig = async (): Promise<AppConfig> => {
 
   let needsRewriteAfterMigration = false;
 
-  // Fold the legacy global hidden-accounts list into the per-provider field
-  // and drop it from disk on the next rewrite.
+  // Fold the legacy global hidden-accounts list and the legacy shared
+  // account-target fields into their per-provider fields; drop the old keys
+  // from disk on the next rewrite.
   if (foldLegacyHiddenAccounts(fileConfig)) {
+    needsRewriteAfterMigration = true;
+  }
+  if (foldLegacyAccountFields(fileConfig)) {
     needsRewriteAfterMigration = true;
   }
 
@@ -295,7 +338,6 @@ export const saveConfig = async (updates: Partial<AppConfig>): Promise<AppConfig
 export const isSetupComplete = (): boolean => {
   const config = getConfig();
   const inbox = config.inboxPath;
-  const account = config.defaultAccount;
   // `processedPath` is unused at runtime when deleteAfterImport is on
   // (services/watcher.ts unlinks the source instead of moving). Treat it
   // as satisfied in that case — otherwise enabling the toggle and
@@ -303,10 +345,16 @@ export const isSetupComplete = (): boolean => {
   const processedSatisfied = !!config.processedPath || !!config.deleteAfterImport;
 
   if (config.budgetProvider === "actual") {
+    // The ACTIVE provider's own account — not a name left over from the
+    // other provider. id OR name: the id can be briefly empty on first
+    // post-upgrade launch until the async name→id migration runs, and the
+    // name keeps the gate satisfied in that window (no spurious wizard).
+    const account = config.actualAccountId || config.actualDefaultAccount;
     return !!(config.actualServerUrl && config.actualPassword && config.actualSyncId && account && inbox && processedSatisfied);
   }
 
   // YNAB (default)
+  const account = config.ynabAccountId || config.ynabDefaultAccount;
   const ynabKey = config.ynabApiKey || process.env.YNAB_API_KEY;
   const ynabBudget = config.ynabBudgetId || process.env.YNAB_BUDGET_ID;
   return !!(ynabKey && ynabBudget && account && inbox && processedSatisfied);
