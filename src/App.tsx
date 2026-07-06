@@ -480,12 +480,23 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
-  const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
+  const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
+  // Read the ACTIVE provider's accounts explicitly (not the server's guess) —
+  // same fix as the Settings loader. BUT only once /config has loaded: until
+  // then appConfig.budgetProvider is the "ynab" default, and passing it would
+  // make an Actual user's cold start fetch YNAB (wrong, and a hang if YNAB is
+  // unreachable). While loading, send undefined so the server uses the correct
+  // on-disk config-active provider — the pre-existing, correct behavior.
+  const activeProvider = configLoading ? undefined : appConfig.budgetProvider;
+  const { accounts, refresh: refreshAccounts } = useAccounts(
+    status.setupComplete,
+    activeProvider,
+  );
   // Resync the account list when the user comes back to the app, so a
   // YNAB-side rename shows up without waiting for the next poll. The 60s
   // server cache bounds the API cost; 30s throttle bounds the trigger.
   useFocusRefresh(refreshAccounts, 30_000);
-  const categories = useCategories(status.setupComplete);
+  const categories = useCategories(status.setupComplete, activeProvider);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
 
@@ -506,7 +517,6 @@ export default function App() {
   );
   const { fetchPending, skipFile } = usePendingFiles(setPendingFiles, removePendingLocal, pruneStaleBuffers);
   fetchPendingRef.current = fetchPending;
-  const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
   // App-level updater state: the hook fires its boot-time check when this
   // mounts (i.e., at app launch), not when Settings opens. The state is
   // passed down to SettingsView's UpdateRow.

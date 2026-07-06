@@ -68,8 +68,8 @@ describe("useBudgetAccountLoader", () => {
     }));
     await act(async () => { await result.current.selectBudget("budget-1"); });
 
-    expect(mockApiFetch).toHaveBeenNthCalledWith(1, "/accounts");
-    expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/accounts?all=true");
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, "/accounts?provider=ynab");
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/accounts?all=true&provider=ynab");
     expect(result.current.state.allAccounts).toEqual(
       refs(["acc-1", "Checking"], ["acc-9", "Hidden"]),
     );
@@ -239,6 +239,49 @@ describe("useBudgetAccountLoader", () => {
     await act(async () => { await result.current.selectBudget("b1"); });
 
     expect(result.current.state.error).toBe("Connected, but failed to load accounts");
+  });
+
+  // Root-cause regression (Actual account dropdown wouldn't load): account
+  // fetches that omitted `?provider=` resolved against the server's guessed
+  // config-active provider, which is stale/racy right after a switch — so an
+  // Actual screen could fetch YNAB accounts (and fail). The loader knows its
+  // own provider (via budgetIdField) and must ALWAYS send it, so no callsite
+  // can trigger the server's guess path.
+  it("refreshAccounts always sends the loader's provider (actual)", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Apple Card"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "actualSyncId" }));
+    await act(async () => { await result.current.refreshAccounts(); });
+    expect(mockApiFetch).toHaveBeenCalledWith("/accounts?provider=actual");
+  });
+
+  it("refreshAccounts always sends the loader's provider (ynab)", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "ynabBudgetId" }));
+    await act(async () => { await result.current.refreshAccounts(); });
+    expect(mockApiFetch).toHaveBeenCalledWith("/accounts?provider=ynab");
+  });
+
+  it("the all=true fetch also carries the loader's provider", async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(refs(["acc-1", "Apple Card"]))
+      .mockResolvedValueOnce(refs(["acc-1", "Apple Card"], ["acc-9", "Hidden"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({
+      budgetIdField: "actualSyncId",
+      loadAllAccounts: true,
+    }));
+    await act(async () => { await result.current.refreshAccounts(); });
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, "/accounts?provider=actual");
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/accounts?all=true&provider=actual");
+  });
+
+  // The synchronous provider-switch case still needs an explicit override:
+  // handleProviderChange calls refreshAccounts before React re-renders the
+  // loader with the new budgetIdField, so the override must win.
+  it("an explicit provider override wins over the loader's own provider", async () => {
+    mockApiFetch.mockResolvedValueOnce(refs(["acc-1", "Checking"]));
+    const { result } = renderHook(() => useBudgetAccountLoader({ budgetIdField: "actualSyncId" }));
+    await act(async () => { await result.current.refreshAccounts(undefined, "ynab"); });
+    expect(mockApiFetch).toHaveBeenCalledWith("/accounts?provider=ynab");
   });
 
   it("setBudgets and setSelectedAccount update state directly", () => {
