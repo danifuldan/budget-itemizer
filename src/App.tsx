@@ -481,22 +481,21 @@ export default function App() {
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
   const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
-  // Read the ACTIVE provider's accounts explicitly (not the server's guess) —
-  // same fix as the Settings loader. BUT only once /config has loaded: until
-  // then appConfig.budgetProvider is the "ynab" default, and passing it would
-  // make an Actual user's cold start fetch YNAB (wrong, and a hang if YNAB is
-  // unreachable). While loading, send undefined so the server uses the correct
-  // on-disk config-active provider — the pre-existing, correct behavior.
-  const activeProvider = configLoading ? undefined : appConfig.budgetProvider;
+  // Read the ACTIVE provider's accounts explicitly (not the server's guess).
+  // Wait for /config to load before fetching: until then appConfig.budgetProvider
+  // is the "ynab" default, so fetching would either target the wrong provider or
+  // require a bare (guessing) call. `configLoading` is initial-load-only (save()
+  // uses mutate, no interval), so this doesn't toggle mid-session; and
+  // useRetryableFetch keeps prior data while disabled, so nothing blanks.
   const { accounts, refresh: refreshAccounts } = useAccounts(
-    status.setupComplete,
-    activeProvider,
+    status.setupComplete && !configLoading,
+    appConfig.budgetProvider,
   );
   // Resync the account list when the user comes back to the app, so a
   // YNAB-side rename shows up without waiting for the next poll. The 60s
   // server cache bounds the API cost; 30s throttle bounds the trigger.
   useFocusRefresh(refreshAccounts, 30_000);
-  const categories = useCategories(status.setupComplete, activeProvider);
+  const categories = useCategories(status.setupComplete && !configLoading, appConfig.budgetProvider);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
 
