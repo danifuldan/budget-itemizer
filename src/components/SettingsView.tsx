@@ -313,7 +313,18 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // (and the next Save) operate on ITS hidden accounts, not the prior
     // provider's.
     setHiddenAccounts(provider === "actual" ? (config.actualHiddenAccounts || []) : (config.ynabHiddenAccounts || []));
-    await apiPost("/config", { budgetProvider: provider });
+    // The config write reaches the backend, but switching to Actual tears down
+    // the prior budget connection ("Closing budget") which can disrupt this
+    // response — making apiPost's res.json() reject. That rejection MUST NOT
+    // abort the reload below: primeBudgets/refreshAccounts read the new provider
+    // EXPLICITLY (?provider=), so they stay correct regardless, and skipping
+    // them left the budget dropdown empty until Test Connection (the bug).
+    try {
+      await apiPost("/config", { budgetProvider: provider });
+    } catch {
+      // Swallow: the write is committed server-side (it logs 200); a thrown
+      // response is not a reason to leave the new provider's data unloaded.
+    }
     // Backend is now on the new provider, so re-fetch ITS budgets (and,
     // if one is saved, accounts) — the mount-time prime only ran for the
     // provider that was active when Settings opened. Without this the
