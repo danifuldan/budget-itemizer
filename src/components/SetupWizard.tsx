@@ -240,8 +240,13 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
       onConfirm={modelDownload.performDelete}
       onCancel={modelDownload.cancelDelete}
     />
+    {/* TitlebarRegion must sit flush at the window top (a direct flex child),
+        NOT inside .wizard's 32px padding — otherwise the only real drag region
+        (data-tauri-drag-region) is pushed 32px below where you grab, and the top
+        strip falls back to -webkit-app-region, which is dead without
+        macOSPrivateApi. That's the "can't drag the Welcome screen" bug. */}
+    <TitlebarRegion />
     <div className="wizard">
-      <TitlebarRegion />
       <ol className="wizard-steps" aria-label="Setup progress">
         {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
           <li
