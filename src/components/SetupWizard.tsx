@@ -525,7 +525,10 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
               value={selectedAccountId}
               onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
               onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
-              disabled={loadingAccounts || accounts.length === 0}
+              // Only disable during the initial load (no accounts yet). `||` here
+              // deadlocked the dropdown — onMouseDown fires a refresh that flips
+              // loadingAccounts true, disabling the select before it can open.
+              disabled={loadingAccounts && accounts.length === 0}
             >
               {accounts.length === 0 && <option value="">{loadingAccounts ? "Loading..." : "Select budget first"}</option>}
               {accounts.map((a) => (

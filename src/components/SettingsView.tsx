@@ -606,7 +606,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                 value={selectedAccountId}
                 onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
                 onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
-                disabled={loadingAccounts}
+                // Disable ONLY during the initial load (no accounts yet). Using
+                // bare loadingAccounts deadlocked the dropdown: onMouseDown fires
+                // a refresh → loadingAccounts=true → the select disables itself
+                // the instant you click it, so it can never open to pick another
+                // account. Once accounts are present, a refresh must not disable.
+                disabled={loadingAccounts && accounts.length === 0}
               >
                 {loadingAccounts && <option value="">Loading accounts...</option>}
                 {!loadingAccounts && accounts.length === 0 && <option value="">No accounts found</option>}
