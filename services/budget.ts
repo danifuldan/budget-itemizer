@@ -2,10 +2,11 @@ import { getBudgetProvider, BudgetConnectionError } from "./budget-provider";
 
 export { BudgetConnectionError };
 
-export const getAllEnvelopes = () => getBudgetProvider().getAllCategories();
-// `provider` lets a settings read target a specific provider regardless of
-// the global config flag (avoids the provider-switch read race); omitted on
-// the import path, which uses the config-active provider.
+// `provider` lets a settings/main-view read target a specific provider
+// regardless of the global config flag (avoids the provider-switch read race);
+// omitted on the import path, which uses the config-active provider.
+export const getAllEnvelopes = (provider?: "ynab" | "actual") =>
+  getBudgetProvider(provider).getAllCategories();
 export const getAllAccounts = (provider?: "ynab" | "actual") =>
   getBudgetProvider(provider).getAllAccounts();
 export const findMatchingTransaction = (

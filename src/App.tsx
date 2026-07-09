@@ -480,6 +480,16 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
+  const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
+  // Read accounts/categories BARE: the server uses its own on-disk
+  // config-active provider, which is authoritative and updates the moment a
+  // provider switch is committed to the backend. Do NOT pass
+  // appConfig.budgetProvider here — this App-level useConfig fetches /config
+  // once and never refetches (no interval; onBack is a bare NAVIGATE), so
+  // after an in-session switch it goes STALE and the main view would fetch the
+  // OLD provider's accounts/categories while the backend is on the new one.
+  // (Explicit ?provider= belongs in Settings, where the loader knows its own
+  // provider synchronously and the rapid-switch read race actually lives.)
   const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
   // Resync the account list when the user comes back to the app, so a
   // YNAB-side rename shows up without waiting for the next poll. The 60s
@@ -506,7 +516,6 @@ export default function App() {
   );
   const { fetchPending, skipFile } = usePendingFiles(setPendingFiles, removePendingLocal, pruneStaleBuffers);
   fetchPendingRef.current = fetchPending;
-  const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
   // App-level updater state: the hook fires its boot-time check when this
   // mounts (i.e., at app launch), not when Settings opens. The state is
   // passed down to SettingsView's UpdateRow.

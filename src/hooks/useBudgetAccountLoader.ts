@@ -82,6 +82,14 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
     initialSelectedAccount = "",
   } = options;
 
+  // The loader's own provider, derived from the budget-id field it manages.
+  // Every account fetch sends this so the server never has to guess from its
+  // (stale-during-a-switch) config-active flag — the root cause of the Actual
+  // account dropdown fetching YNAB and failing. Callers may still override it
+  // (the synchronous provider-switch case, before React re-renders the loader).
+  const loaderProvider: "ynab" | "actual" =
+    budgetIdField === "actualSyncId" ? "actual" : "ynab";
+
   const [budgets, setBudgetsState] = useState<BudgetSummary[]>(initialBudgets);
   const [selectedBudgetId, setSelectedBudgetId] = useState(initialSelectedBudgetId);
   const [accounts, setAccounts] = useState<AccountRef[]>([]);
@@ -99,11 +107,11 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
   const setBudgets = (next: BudgetSummary[]) => setBudgetsState(next);
   const setSelectedAccount = (account: string) => setSelectedAccountState(account);
 
-  const fetchAccountsFor = async (token: number, preferredAccountId?: string, provider?: "ynab" | "actual") => {
+  const fetchAccountsFor = async (token: number, preferredAccountId?: string, providerOverride?: "ynab" | "actual") => {
     setError("");
+    const provider = providerOverride ?? loaderProvider;
     try {
-      const providerQuery = provider ? `?provider=${provider}` : "";
-      const accts = await apiFetch<AccountRef[]>(`/accounts${providerQuery}`);
+      const accts = await apiFetch<AccountRef[]>(`/accounts?provider=${provider}`);
       if (inflightRef.current !== token) return; // stale — drop
       setAccounts(accts);
       // Decide the selection from `preferredAccountId` when the caller gave
@@ -121,7 +129,7 @@ export function useBudgetAccountLoader(options: UseBudgetAccountLoaderOptions): 
       });
 
       if (loadAllAccounts) {
-        const all = await apiFetch<AccountRef[]>(`/accounts?all=true${provider ? `&provider=${provider}` : ""}`);
+        const all = await apiFetch<AccountRef[]>(`/accounts?all=true&provider=${provider}`);
         if (inflightRef.current !== token) return;
         setAllAccounts(all);
       }

@@ -10,7 +10,7 @@ import { useActualTest } from "../hooks/useActualTest";
 import { useBudgetAccountLoader } from "../hooks/useBudgetAccountLoader";
 import { budgetIdFieldFor, accountUpdateFor } from "../lib/budgetProvider";
 import { useFocusRefresh } from "../hooks/useFocusRefresh";
-import { apiFetch, apiPost } from "../api/client";
+import { apiFetch, apiPost, ApiError } from "../api/client";
 import Toggle from "./Toggle";
 import TitlebarRegion from "./TitlebarRegion";
 import ConfirmDialog from "./ConfirmDialog";
@@ -313,7 +313,28 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
     // (and the next Save) operate on ITS hidden accounts, not the prior
     // provider's.
     setHiddenAccounts(provider === "actual" ? (config.actualHiddenAccounts || []) : (config.ynabHiddenAccounts || []));
-    await apiPost("/config", { budgetProvider: provider });
+    // The switch write can fail two very different ways, and they must NOT be
+    // treated alike:
+    //   1. Benign disruption — the write commits (200), but tearing down the
+    //      prior budget connection ("Closing budget") truncates the response
+    //      body, so apiPost's res.json() rejects with a PARSE error (not an
+    //      ApiError). The backend IS on the new provider; the reload below
+    //      reads it explicitly (?provider=), so we swallow and continue.
+    //   2. Genuine failure — a non-2xx (ApiError). saveConfig ran AFTER the
+    //      teardown on the server, so a non-2xx means the write did NOT commit
+    //      and the backend is STILL on the old provider. Priming the new
+    //      provider's data here would show a phantom switch. Surface it and
+    //      stop, leaving the user on the new provider's block to fix creds and
+    //      Test Connection.
+    try {
+      await apiPost("/config", { budgetProvider: provider });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setBudgetsError("Couldn't switch budget app. Check the connection and Test Connection to retry.");
+        return;
+      }
+      // else: benign body-disruption on a committed write — fall through.
+    }
     // Backend is now on the new provider, so re-fetch ITS budgets (and,
     // if one is saved, accounts) — the mount-time prime only ran for the
     // provider that was active when Settings opened. Without this the
@@ -595,7 +616,12 @@ export default function SettingsView({ onBack, onRunSetup, themePreference, onTh
                 value={selectedAccountId}
                 onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
                 onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
-                disabled={loadingAccounts}
+                // Disable ONLY during the initial load (no accounts yet). Using
+                // bare loadingAccounts deadlocked the dropdown: onMouseDown fires
+                // a refresh → loadingAccounts=true → the select disables itself
+                // the instant you click it, so it can never open to pick another
+                // account. Once accounts are present, a refresh must not disable.
+                disabled={loadingAccounts && accounts.length === 0}
               >
                 {loadingAccounts && <option value="">Loading accounts...</option>}
                 {!loadingAccounts && accounts.length === 0 && <option value="">No accounts found</option>}

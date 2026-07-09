@@ -58,7 +58,8 @@ meta.get("/accounts", auth, async (c) => {
 
 meta.get("/categories", auth, async (c) => {
   try {
-    const categories = await getAllEnvelopes();
+    const provider = readProviderQuery(c.req.query("provider"));
+    const categories = await getAllEnvelopes(provider);
     return c.json(categories, 200);
   } catch (err: any) {
     console.error("Error fetching categories:", err);

@@ -1455,13 +1455,11 @@ body::after {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 32px 24px 32px;
-  -webkit-app-region: drag;
-}
-
-.wizard-card,
-.wizard-steps {
-  -webkit-app-region: no-drag;
+  /* No top padding: the title bar is now a flush sibling ABOVE .wizard, so the
+     window drags there (data-tauri-drag-region) like every other view. Dropped
+     the -webkit-app-region drag/no-drag pair — dead without macOSPrivateApi, and
+     it masked the real bug (the title bar being pushed 32px off the top edge). */
+  padding: 24px 24px 32px;
 }
 
 .wizard-close-inline {

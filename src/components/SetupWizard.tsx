@@ -240,8 +240,13 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
       onConfirm={modelDownload.performDelete}
       onCancel={modelDownload.cancelDelete}
     />
+    {/* TitlebarRegion must sit flush at the window top (a direct flex child),
+        NOT inside .wizard's 32px padding — otherwise the only real drag region
+        (data-tauri-drag-region) is pushed 32px below where you grab, and the top
+        strip falls back to -webkit-app-region, which is dead without
+        macOSPrivateApi. That's the "can't drag the Welcome screen" bug. */}
+    <TitlebarRegion />
     <div className="wizard">
-      <TitlebarRegion />
       <ol className="wizard-steps" aria-label="Setup progress">
         {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
           <li
@@ -525,7 +530,14 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
               value={selectedAccountId}
               onChange={(e) => budgetAccountLoader.setSelectedAccount(e.target.value)}
               onMouseDown={() => { if (budgetAccountLoader.state.selectedBudgetId) budgetAccountLoader.refreshAccounts(); }}
-              disabled={loadingAccounts || accounts.length === 0}
+              // Disable until a budget is picked (nothing to load yet — the
+              // dropdown shows "Select budget first"), then only during the
+              // INITIAL load. Do NOT use bare `||` on account count: that
+              // deadlocked the dropdown once a budget was chosen — onMouseDown
+              // fires a refresh that flips loadingAccounts true, and a bare `||`
+              // disabled the select before it could open. Gating the load half
+              // on `accounts.length === 0` keeps a refresh-with-accounts open.
+              disabled={!budgetAccountLoader.state.selectedBudgetId || (loadingAccounts && accounts.length === 0)}
             >
               {accounts.length === 0 && <option value="">{loadingAccounts ? "Loading..." : "Select budget first"}</option>}
               {accounts.map((a) => (
