@@ -363,23 +363,30 @@ export function reducer(state: AppState, action: AppAction): AppState {
         action.defaultAccountId && action.accounts.some((a) => a.id === action.defaultAccountId)
           ? action.defaultAccountId
           : null;
-      // A committed selection (user pick, or a previously-resolved real
-      // default) is never overridden — keeps re-dispatches on every poll
-      // (useRetryableFetch returns a fresh array each time) idempotent.
-      if (state.selectedAccount && !state.accountIsProvisional) return state;
+      // A committed selection (user pick, or a resolved default) is kept ONLY
+      // while it's still a real account in the current list. That keeps
+      // re-dispatches on every poll idempotent (the id is still present) AND
+      // lets a provider switch fall through: the new provider's accounts don't
+      // contain the old id, so we re-resolve to the new default instead of
+      // pinning a now-invalid account (which would leave the picker showing an
+      // id absent from its own option list).
+      const selectionStillValid =
+        !!state.selectedAccount && action.accounts.some((a) => a.id === state.selectedAccount);
+      if (selectionStillValid && !state.accountIsProvisional) return state;
       // The real default is known now: commit it. This also CORRECTS a
       // provisional first-account pick made on an earlier emit when
-      // ynabAccountId hadn't been persisted yet (post-upgrade ordering).
+      // ynabAccountId hadn't been persisted yet (post-upgrade ordering), and
+      // the stale-selection case above (a provider switch).
       if (resolvedId) {
         return { ...state, selectedAccount: resolvedId, accountIsProvisional: false };
       }
-      // No default yet and nothing chosen — provisionally show the first
-      // account so the picker isn't empty; a later real default (above)
-      // corrects it, a user pick (SET_ACCOUNT) supersedes it.
-      if (!state.selectedAccount) {
+      // No valid default and the current pick is stale/empty — provisionally
+      // show the first account so the picker isn't empty; a later real default
+      // (above) corrects it, a user pick (SET_ACCOUNT) supersedes it.
+      if (!selectionStillValid) {
         return { ...state, selectedAccount: action.accounts[0].id, accountIsProvisional: true };
       }
-      return state; // keep the existing provisional pick
+      return state; // keep the existing (valid) provisional pick
     }
     case "APPLY_PARSE_PROGRESS_EVENT": {
       const { event } = action;
@@ -480,22 +487,23 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
-  const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
+  const { config: appConfig, loading: configLoading, save: saveConfig, refresh: refreshConfig } = useConfig();
   // Read accounts/categories BARE: the server uses its own on-disk
   // config-active provider, which is authoritative and updates the moment a
   // provider switch is committed to the backend. Do NOT pass
   // appConfig.budgetProvider here — this App-level useConfig fetches /config
-  // once and never refetches (no interval; onBack is a bare NAVIGATE), so
-  // after an in-session switch it goes STALE and the main view would fetch the
-  // OLD provider's accounts/categories while the backend is on the new one.
-  // (Explicit ?provider= belongs in Settings, where the loader knows its own
-  // provider synchronously and the rapid-switch read race actually lives.)
+  // once (no interval), so pinning to it would go STALE after an in-session
+  // switch. Instead we re-read config + these lists on Settings exit (see
+  // returnToMainFromSettings), which is the one place the active provider,
+  // saved default account, or creds can change. (Explicit ?provider= belongs
+  // in Settings, where the loader knows its own provider synchronously and the
+  // rapid-switch read race actually lives.)
   const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
   // Resync the account list when the user comes back to the app, so a
   // YNAB-side rename shows up without waiting for the next poll. The 60s
   // server cache bounds the API cost; 30s throttle bounds the trigger.
   useFocusRefresh(refreshAccounts, 30_000);
-  const categories = useCategories(status.setupComplete);
+  const { categories, refresh: refreshCategories } = useCategories(status.setupComplete);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
 
@@ -560,6 +568,36 @@ export default function App() {
   useEffect(() => {
     dispatch({ type: "ACCOUNTS_LOADED", accounts, defaultAccountId: activeAccountId });
   }, [accounts, activeAccountId]);
+
+  // Returning to the main view from Settings: re-read /config so the main view
+  // reflects any change made there (active provider, saved default account,
+  // creds). Settings commits a provider switch via a direct /config write that
+  // bypasses this App-level useConfig (SettingsView.handleProviderChange), and
+  // useConfig fetches /config once (no interval) — so without this re-read
+  // appConfig stays stale and activeAccountId (the default import account)
+  // keeps showing the old provider until a focus refresh or restart. /config is
+  // a cheap local read; the provider-scoped lists are refetched only when the
+  // provider actually changed (effect below), so a no-op Settings visit or a
+  // same-provider edit costs one local read, not two budget-API calls.
+  const returnToMainFromSettings = useCallback(() => {
+    refreshConfig();
+    dispatch({ type: "NAVIGATE", view: "main" });
+  }, [refreshConfig]);
+
+  // When the active provider changes (surfaced by the /config re-read above),
+  // refetch the provider-scoped lists so accounts + categories match the new
+  // provider. Gating on the provider — not every config read — avoids a
+  // needless budget-API call on same-provider edits or no-op visits. And
+  // because the refetch is TRIGGERED BY the provider change, appConfig (hence
+  // activeAccountId) is already fresh when the new accounts land, so
+  // ACCOUNTS_LOADED resolves the new provider's default with no ordering race.
+  const prevProviderRef = useRef(appConfig.budgetProvider);
+  useEffect(() => {
+    if (prevProviderRef.current === appConfig.budgetProvider) return;
+    prevProviderRef.current = appConfig.budgetProvider;
+    refreshAccounts();
+    refreshCategories();
+  }, [appConfig.budgetProvider, refreshAccounts, refreshCategories]);
 
   const handleFile = (file: File) => {
     // If the LLM is still warming up, don't enter the review flow — the
@@ -758,7 +796,7 @@ export default function App() {
     return (
       <SettingsView
         scrollToSection={state.settingsSection}
-        onBack={() => dispatch({ type: "NAVIGATE", view: "main" })}
+        onBack={returnToMainFromSettings}
         onRunSetup={() => dispatch({ type: "NAVIGATE", view: "setup" })}
         themePreference={themePreference}
         onThemeChange={setTheme}
