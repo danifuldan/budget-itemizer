@@ -13,9 +13,9 @@ const mock = vi.mocked(useRetryableFetch);
 describe("useCategories", () => {
   beforeEach(() => mock.mockClear());
 
-  // Categories are provider-specific (YNAB categories vs Actual envelopes);
-  // same class as the account reads — state the provider, don't let the server
-  // guess its config-active flag.
+  // Categories are provider-specific (YNAB categories vs Actual envelopes).
+  // Opt-in escape hatch for callers that must target a SPECIFIC provider; the
+  // main view uses the bare form below (server config-active is authoritative).
   it("fetches the given provider's categories explicitly", () => {
     renderHook(() => useCategories(true, "actual"));
     expect(mock).toHaveBeenCalledWith("/categories?provider=actual", [], { enabled: true });

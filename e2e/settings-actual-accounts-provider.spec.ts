@@ -1,7 +1,8 @@
 /**
  * Regression: switching to Actual must load the Actual account list, and every
- * /accounts request must carry ?provider= (never a bare call that the server
- * resolves against its stale config-active guess).
+ * account fetch made by the SETTINGS loader must carry ?provider= (never a bare
+ * call that the server would resolve against its stale config-active guess
+ * mid-switch).
  *
  * The bug: no-provider account fetches resolved to YNAB while on Actual; YNAB
  * was unreachable, the call failed, and last-write-wins blanked the good Actual
@@ -9,8 +10,12 @@
  *
  * This mock returns the Actual account ONLY for provider=actual; a bare or
  * provider=ynab call 500s (simulating unreachable YNAB). So the dropdown fills
- * iff the frontend sent provider=actual — and we also assert no /accounts
- * request ever went out without a provider.
+ * iff the frontend sent provider=actual — and we assert no SETTINGS /accounts
+ * request went out without a provider.
+ *
+ * Note: the main view legitimately reads /accounts BARE (the server uses its
+ * authoritative config-active provider there — see main-view-reads-bare-provider),
+ * so we snapshot only the calls made from the switch onward.
  */
 import { test, expect } from "@playwright/test";
 
@@ -73,6 +78,11 @@ test("settings: switching to Actual loads accounts via provider=actual, never ba
   await gear.waitFor({ state: "visible", timeout: 10_000 });
   await gear.click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  // Ignore the main view's mount-time bare read (now expected — the main view
+  // is server-authoritative). Only the SETTINGS loader's calls, from the switch
+  // onward, are under test here.
+  accountsUrls.length = 0;
 
   // Switch the Budget App to Actual.
   await page.getByLabel("Budget App").selectOption("actual");

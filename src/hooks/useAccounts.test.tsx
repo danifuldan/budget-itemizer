@@ -13,9 +13,10 @@ const mock = vi.mocked(useRetryableFetch);
 describe("useAccounts", () => {
   beforeEach(() => mock.mockClear());
 
-  // Same class as the Settings loader bug: the main-view import dropdown must
-  // read a SPECIFIC provider's accounts, not rely on the server guessing its
-  // config-active flag.
+  // Opt-in escape hatch for callers that must target a SPECIFIC provider
+  // regardless of the server's config-active flag. The main view uses the bare
+  // form below (server config-active is authoritative); this param exists for
+  // provider-explicit callers in the same class as the Settings loader.
   it("fetches the given provider's accounts explicitly", () => {
     renderHook(() => useAccounts(true, "actual"));
     expect(mock).toHaveBeenCalledWith("/accounts?provider=actual", [], { enabled: true });

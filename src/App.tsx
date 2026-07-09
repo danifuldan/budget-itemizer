@@ -481,21 +481,21 @@ export default function App() {
   const { history, refresh, remove } = useHistory();
   const { refresh: refreshStatus, loaded: statusLoaded, ...status } = useStatus();
   const { config: appConfig, loading: configLoading, save: saveConfig } = useConfig();
-  // Read the ACTIVE provider's accounts explicitly (not the server's guess).
-  // Wait for /config to load before fetching: until then appConfig.budgetProvider
-  // is the "ynab" default, so fetching would either target the wrong provider or
-  // require a bare (guessing) call. `configLoading` is initial-load-only (save()
-  // uses mutate, no interval), so this doesn't toggle mid-session; and
-  // useRetryableFetch keeps prior data while disabled, so nothing blanks.
-  const { accounts, refresh: refreshAccounts } = useAccounts(
-    status.setupComplete && !configLoading,
-    appConfig.budgetProvider,
-  );
+  // Read accounts/categories BARE: the server uses its own on-disk
+  // config-active provider, which is authoritative and updates the moment a
+  // provider switch is committed to the backend. Do NOT pass
+  // appConfig.budgetProvider here — this App-level useConfig fetches /config
+  // once and never refetches (no interval; onBack is a bare NAVIGATE), so
+  // after an in-session switch it goes STALE and the main view would fetch the
+  // OLD provider's accounts/categories while the backend is on the new one.
+  // (Explicit ?provider= belongs in Settings, where the loader knows its own
+  // provider synchronously and the rapid-switch read race actually lives.)
+  const { accounts, refresh: refreshAccounts } = useAccounts(status.setupComplete);
   // Resync the account list when the user comes back to the app, so a
   // YNAB-side rename shows up without waiting for the next poll. The 60s
   // server cache bounds the API cost; 30s throttle bounds the trigger.
   useFocusRefresh(refreshAccounts, 30_000);
-  const categories = useCategories(status.setupComplete && !configLoading, appConfig.budgetProvider);
+  const categories = useCategories(status.setupComplete);
   const { startStream, abort } = useReceiptStream(dispatch);
   const fetchPendingRef = useRef<(() => void) | undefined>(undefined);
 
