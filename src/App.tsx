@@ -584,20 +584,31 @@ export default function App() {
     dispatch({ type: "NAVIGATE", view: "main" });
   }, [refreshConfig]);
 
-  // When the active provider changes (surfaced by the /config re-read above),
-  // refetch the provider-scoped lists so accounts + categories match the new
-  // provider. Gating on the provider — not every config read — avoids a
-  // needless budget-API call on same-provider edits or no-op visits. And
-  // because the refetch is TRIGGERED BY the provider change, appConfig (hence
-  // activeAccountId) is already fresh when the new accounts land, so
-  // ACCOUNTS_LOADED resolves the new provider's default with no ordering race.
-  const prevProviderRef = useRef(appConfig.budgetProvider);
+  // When the active provider changes (surfaced by the /config re-read above, or
+  // by finishing setup), refetch the provider-scoped lists so accounts +
+  // categories match the new provider. Gating on the provider — not every
+  // config read — avoids a needless budget-API call on same-provider edits or
+  // no-op visits. And because the refetch is TRIGGERED BY the provider change,
+  // appConfig (hence activeAccountId) is already fresh when the new accounts
+  // land, so ACCOUNTS_LOADED resolves the new provider's default with no
+  // ordering race.
+  //
+  // Baseline only after /config's first authoritative load (null sentinel):
+  // seeding from the pre-load "ynab" default would fire a redundant refetch the
+  // instant an already-configured Actual user's real config arrives — the mount
+  // read already fetched the right list.
+  const prevProviderRef = useRef<"ynab" | "actual" | null>(null);
   useEffect(() => {
+    if (configLoading) return; // wait for the authoritative value
+    if (prevProviderRef.current === null) {
+      prevProviderRef.current = appConfig.budgetProvider; // baseline, no refetch
+      return;
+    }
     if (prevProviderRef.current === appConfig.budgetProvider) return;
     prevProviderRef.current = appConfig.budgetProvider;
     refreshAccounts();
     refreshCategories();
-  }, [appConfig.budgetProvider, refreshAccounts, refreshCategories]);
+  }, [appConfig.budgetProvider, configLoading, refreshAccounts, refreshCategories]);
 
   const handleFile = (file: File) => {
     // If the LLM is still warming up, don't enter the review flow — the
@@ -783,6 +794,12 @@ export default function App() {
     return (
       <SetupWizard
         onComplete={() => {
+          // Setup just wrote the provider/budget/account to the backend. Re-read
+          // /config too (not only status), or appConfig stays on the pre-setup
+          // default — activeAccountId (the default import account) would be
+          // empty and the provider-change effect wouldn't fire for a first-run
+          // Actual setup. Same reason Settings exit re-reads config.
+          refreshConfig();
           refreshStatus();
           dispatch({ type: "NAVIGATE", view: "main" });
         }}

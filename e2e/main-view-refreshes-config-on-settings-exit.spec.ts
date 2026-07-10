@@ -25,14 +25,14 @@ const baseConfig = {
   ynabHiddenAccounts: [], actualHiddenAccounts: [],
 };
 
-async function mockMainView(page: Page) {
-  const state = { provider: "ynab" };
+async function mockMainView(page: Page, initialProvider: "ynab" | "actual" = "ynab") {
+  const state = { provider: initialProvider };
   const configGets: string[] = [];
   const bareAccountsGets: string[] = [];
   const bareCategoriesGets: string[] = [];
 
   await page.route("**/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ setup: true, llmReady: true, watcher: { running: true, path: "/tmp/in" } }) }));
-  await page.route("**/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ complete: true, config: { hasYnabApiKey: true, ...baseConfig, budgetProvider: "ynab" }, auth: { username: "u", password: "p" } }) }));
+  await page.route("**/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ complete: true, config: { hasYnabApiKey: true, ...baseConfig, budgetProvider: initialProvider }, auth: { username: "u", password: "p" } }) }));
   await page.route("**/config", (r) => {
     const req = r.request();
     if (req.method() === "GET") {
@@ -110,4 +110,15 @@ test("a no-op Settings visit refetches only /config, not the budget-API lists", 
   await page.waitForTimeout(500);
   expect(bareAccountsGets.length, "bare /accounts must not refetch on a no-op visit").toBe(acctBefore);
   expect(bareCategoriesGets.length, "bare /categories must not refetch on a no-op visit").toBe(catBefore);
+});
+
+test("an already-configured Actual startup fetches each bare list once (no redundant refetch)", async ({ page }) => {
+  // Provider is Actual from the first byte. The provider-change effect must
+  // BASELINE off the first authoritative /config load rather than the pre-load
+  // "ynab" default — otherwise ynab→actual looks like a change and refetches
+  // the lists a second time at startup.
+  const { bareAccountsGets, bareCategoriesGets } = await mockMainView(page, "actual");
+  await page.waitForTimeout(750); // let any spurious effect-triggered refetch land
+  expect(bareAccountsGets.length, `bare /accounts at startup: ${JSON.stringify(bareAccountsGets)}`).toBe(1);
+  expect(bareCategoriesGets.length, `bare /categories at startup: ${JSON.stringify(bareCategoriesGets)}`).toBe(1);
 });
